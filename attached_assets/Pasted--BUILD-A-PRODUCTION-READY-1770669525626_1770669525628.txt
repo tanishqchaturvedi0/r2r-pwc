@@ -1,0 +1,1532 @@
+═══════════════════════════════════════════════════════════════════════════
+BUILD A PRODUCTION-READY ACCRUALS MANAGEMENT SYSTEM
+═══════════════════════════════════════════════════════════════════════════
+
+OVERVIEW:
+Full-stack financial accruals management application with role-based access control,
+SQLite database persistence, JWT authentication, and dynamic views based on user roles.
+
+TECH STACK:
+- Frontend: React 18 + TypeScript + Tailwind CSS + shadcn/ui
+- Backend: Node.js + Express + TypeScript
+- Database: SQLite with better-sqlite3
+- Auth: JWT tokens + bcrypt hashing
+- CSV: Papa Parse + Multer
+- Charts: Recharts
+- Notifications: React Hot Toast
+- Icons: Lucide React
+
+═══════════════════════════════════════════════════════════════════════════
+PART 1: DATABASE SCHEMA
+═══════════════════════════════════════════════════════════════════════════
+
+Create SQLite database with these tables:
+
+**CORE TABLES:**
+
+1. users
+   - id, email (unique), password_hash, name, phone
+   - status (Active/Inactive), created_at, last_login
+   - reset_token, reset_token_expiry
+
+2. user_roles (many-to-many)
+   - id, user_id (FK), role (Finance Admin / Finance Approver / Business User)
+   - assigned_at, assigned_by (FK to users)
+   - UNIQUE(user_id, role) - allow multiple roles per user
+
+3. cost_center_assignments (many-to-many)
+   - id, user_id (FK), cost_center
+   - assigned_at
+   - UNIQUE(user_id, cost_center)
+
+**PO DATA TABLES:**
+
+4. po_uploads
+   - id, uploaded_by (FK), filename, processing_month
+   - upload_date, total_rows, period_based_count, activity_based_count
+   - status
+
+5. po_lines (main data)
+   - id, upload_id (FK), unique_id (unique)
+   - po_number, po_line_item, vendor_name, item_description
+   - project_name, wbs_element, cost_center, profit_center
+   - gl_account, doc_type, start_date, end_date, plant
+   - net_amount, pr_number, pr_owner_id, cost_center_owner_id
+   - document_date, category (Period/Activity)
+   - status (Draft/Under Review/Approved/Posted)
+   - created_at, updated_at
+
+6. grn_transactions
+   - id, po_line_id (FK), grn_date, grn_doc
+   - grn_movement_type, grn_value
+   - created_at
+
+**CALCULATION TABLES:**
+
+7. period_calculations
+   - id, po_line_id (FK), processing_month
+   - prev_month_true_up, current_month_true_up, remarks
+   - calculated_at, calculated_by (FK)
+   - UNIQUE(po_line_id, processing_month)
+
+8. activity_assignments
+   - id, po_line_id (FK), assigned_to_user_id (FK)
+   - is_primary (boolean), assigned_date, assigned_by (FK)
+   - status (Not Assigned/Assigned/Responded/Overdue)
+
+9. business_responses
+   - id, assignment_id (FK)
+   - completion_status (Not Started/In Progress/Completed/Discontinue)
+   - provision_amount, provision_percent, comments
+   - attachments (JSON), response_date
+   - finance_true_up, finance_remarks
+
+**NON-PO TABLES:**
+
+10. nonpo_forms
+    - id, form_name, description, due_date, priority
+    - field_configuration (JSON)
+    - created_by (FK), created_at, is_template
+
+11. nonpo_form_assignments
+    - id, form_id (FK), assigned_to_user_id (FK)
+    - assigned_date
+
+12. nonpo_submissions
+    - id, form_id (FK), submitted_by (FK)
+    - submission_date, standard_fields (JSON), custom_fields (JSON)
+    - attachments (JSON), finance_true_up, finance_remarks
+    - status (Draft/Submitted/Under Review/Approved)
+    - reviewed_by (FK), reviewed_at
+
+**RULES & CONFIG:**
+
+13. approval_rules
+    - id, rule_name, natural_language_text
+    - parsed_conditions (JSON), parsed_actions (JSON)
+    - priority, applies_to (Activity/NonPO/Both)
+    - is_active, created_by (FK), created_at
+
+14. system_config
+    - id, config_key (unique), config_value
+    - updated_by (FK), updated_at
+
+15. audit_log
+    - id, user_id (FK), action, entity_type, entity_id
+    - details (JSON), ip_address, timestamp
+
+16. notifications
+    - id, user_id (FK), notification_type, title, message
+    - entity_type, entity_id, is_read, created_at
+
+17. role_permissions (for permission management UI)
+    - id, role, permission
+    - can_view, can_create, can_edit, can_delete, can_approve
+    - UNIQUE(role, permission)
+
+IMPORTANT: Add indexes on:
+- users(email), po_lines(po_number), po_lines(category)
+- po_lines(cost_center), po_lines(upload_id)
+- activity_assignments(assigned_to_user_id)
+- All foreign keys
+
+═══════════════════════════════════════════════════════════════════════════
+PART 2: ROLE-BASED ACCESS CONTROL (RBAC)
+═══════════════════════════════════════════════════════════════════════════
+
+DEFINE THREE USER ROLES:
+
+**ROLE 1: FINANCE ADMIN**
+Permissions:
+✓ Full access to all modules
+✓ Upload CSV / Import data
+✓ Create, edit, delete PO calculations
+✓ Assign activity-based POs to users
+✓ Create and assign Non-PO forms
+✓ Create and manage approval rules
+✓ Onboard new users
+✓ Assign/remove roles from users
+✓ Manage cost center assignments
+✓ Configure system settings
+✓ Manage role permissions
+✓ View all reports and export all data
+✓ Approve provisions
+
+Navigation visible:
+- Dashboard
+- Period-Based Accruals
+- Activity-Based Accruals
+- Non-PO Accruals
+- Approval Rules
+- User Management
+- Reports
+- Configuration
+
+**ROLE 2: FINANCE APPROVER**
+Permissions:
+✓ View dashboard
+✓ View all period-based accruals
+✓ Edit period-based (add true-ups and remarks only)
+✓ View all activity-based assignments
+✓ Approve activity-based responses
+✓ View all Non-PO submissions
+✓ Review and approve Non-PO accruals (add true-ups, remarks)
+✓ View approval rules (read-only)
+✓ View users (read-only)
+✓ View and export reports
+✓ View configuration (read-only)
+✗ Cannot upload CSV
+✗ Cannot create users
+✗ Cannot assign roles
+✗ Cannot create approval rules
+
+Navigation visible:
+- Dashboard
+- Period-Based Accruals
+- Activity-Based Accruals
+- Non-PO Accruals
+- Approval Rules (view only)
+- User Management (view only)
+- Reports
+- Configuration (view only)
+
+**ROLE 3: BUSINESS USER**
+Permissions:
+✓ View limited dashboard (only their assigned metrics)
+✓ View ONLY activity-based POs assigned to them
+✓ Respond to assigned activity-based POs
+✓ View ONLY Non-PO forms assigned to them
+✓ Submit Non-PO form responses
+✓ Add comments and upload attachments
+✓ Return items to finance with questions
+✓ View own profile
+✗ Cannot view period-based accruals
+✗ Cannot view other users' assignments
+✗ Cannot access reports
+✗ Cannot access configuration
+✗ Cannot access approval rules
+✗ Cannot access user management
+
+Navigation visible:
+- Dashboard (limited)
+- My Tasks (Activity-Based assignments)
+- My Forms (Non-PO forms)
+- Profile
+
+KEY IMPLEMENTATION NOTES:
+
+1. **Multiple Roles Per User:**
+   - A user can have BOTH "Finance Admin" AND "Finance Approver"
+   - Permissions are ADDITIVE (union of all role permissions)
+   - If user has multiple roles, show combined navigation
+   - Check: `hasAnyRole(['Finance Admin', 'Finance Approver'])`
+
+2. **Permission Checking:**
+   - Frontend: Hide/show UI elements based on permissions
+   - Backend: ALWAYS validate permissions on API endpoints
+   - Use middleware: `requirePermission('period_based.edit')`
+
+3. **Dynamic Navigation:**
+   - Sidebar items filtered by user's roles
+   - Show only accessible routes
+   - Active tab highlighting works across roles
+
+4. **Data Filtering:**
+   - Finance Admin/Approver: See ALL data
+   - Business User: Filter by `assigned_to_user_id = current_user_id`
+
+5. **Action Buttons:**
+   - Conditionally render based on permissions
+   - Example: Show "Approve" button only if `hasPermission('activity_based.approve')`
+
+═══════════════════════════════════════════════════════════════════════════
+PART 3: AUTHENTICATION FLOW
+═══════════════════════════════════════════════════════════════════════════
+
+**LOGIN PROCESS:**
+
+1. User enters email + password
+2. Backend validates credentials:
+   - Find user by email (status = Active)
+   - Verify password with bcrypt
+   - Fetch user roles from user_roles table
+   - Fetch cost centers from cost_center_assignments
+3. Generate JWT token containing:
+   - userId, email, roles array
+   - Expiry: 24 hours
+4. Return token + user object to frontend
+5. Frontend stores token in memory (NOT localStorage - more secure)
+6. Update last_login timestamp in database
+
+**TOKEN VALIDATION:**
+
+- Every API request includes: `Authorization: Bearer <token>`
+- Backend middleware validates token on protected routes
+- Extract userId and roles from token
+- Attach to request object: `req.userId`, `req.userRoles`
+
+**ROLE CHECKING:**
+
+Backend middleware examples:
+- `requireRole('Finance Admin')` - Must have specific role
+- `requireAnyRole(['Finance Admin', 'Finance Approver'])` - At least one
+- `requirePermission('period_based.edit')` - Has specific permission
+
+Frontend hooks:
+- `useAuth()` - Get current user, token, roles
+- `hasRole('Finance Admin')` - Check single role
+- `hasAnyRole(['Finance Admin', 'Finance Approver'])` - Check multiple
+- `hasPermission('period_based.edit')` - Check permission
+
+**LOGOUT:**
+- Clear token from memory
+- Redirect to login
+- Database data PERSISTS (not deleted)
+
+**SESSION MANAGEMENT:**
+- Token expires after 24 hours
+- On expiry: Redirect to login, show "Session expired" message
+- Optional: Implement refresh tokens for extended sessions
+
+═══════════════════════════════════════════════════════════════════════════
+PART 4: USER ONBOARDING & ROLE MANAGEMENT
+═══════════════════════════════════════════════════════════════════════════
+
+**USER ONBOARDING (Finance Admin only):**
+
+CREATE USER FORM:
+Fields:
+- Name (required)
+- Email (required, unique, validated)
+- Phone (optional)
+- Password (required for new user, min 6 chars)
+- Confirm Password
+- Roles (checkboxes - can select multiple):
+  □ Finance Admin
+  □ Finance Approver
+  □ Business User
+- Cost Center Assignments (if Finance Approver or Business User selected):
+  - Multi-select or chip input
+  - Can assign to multiple cost centers
+- Status: Active / Inactive (dropdown)
+
+Validation:
+- Email must be unique
+- Passwords must match
+- At least one role required
+- If Business User or Finance Approver role: suggest cost center assignment
+
+On Save:
+1. Hash password with bcrypt (10 rounds)
+2. Insert into users table
+3. Insert roles into user_roles table
+4. Insert cost centers into cost_center_assignments table
+5. Log action in audit_log
+6. Send notification (optional)
+
+**EDIT USER:**
+- Same form, pre-populated
+- Email field disabled (cannot change)
+- Can change name, phone, roles, cost centers, status
+- Password change optional (leave blank to keep existing)
+
+**ROLE ASSIGNMENT LOGIC:**
+
+Finance Admin can:
+- Add/remove roles from any user
+- Assign users to cost centers
+- Activate/deactivate users
+
+When assigning roles:
+- Show role descriptions
+- Indicate permissions each role has
+- Warn if removing last Finance Admin
+
+**COST CENTER MAPPING:**
+
+Purpose: Auto-suggest approvers for Activity-based POs and Non-PO forms
+
+How it works:
+1. User is assigned to cost centers (e.g., user "Jane" → CCs: 40030403, 40030405)
+2. When Finance creates activity assignment:
+   - System reads PO's cost center
+   - Suggests all users assigned to that cost center
+   - Finance can accept or override
+3. Multiple users can be assigned to same cost center
+
+UI for Cost Center Management:
+- Table view: Cost Center | Users | Actions
+- Click "Edit" → Modal shows current users, can add/remove
+- Bulk import from CSV: CostCenter, UserEmail
+
+═══════════════════════════════════════════════════════════════════════════
+PART 5: CONFIGURATION & SETTINGS
+═══════════════════════════════════════════════════════════════════════════
+
+**CONFIGURATION PAGE (Finance Admin only):**
+
+**TAB 1: PROCESSING CONFIGURATION**
+
+Fields stored in system_config table:
+- Processing Month (dropdown: Jan 2026, Feb 2026, etc.)
+  - Key: 'processing_month', Value: 'Feb 2026'
+  - Used for all provision calculations
+- Threshold Amount (₹)
+  - Key: 'threshold_amount', Value: '10000'
+  - PO lines below this excluded from display
+- Exclude Document Types (multi-select)
+  - Key: 'exclude_doc_types', Value: JSON array
+- Exclude Plants (multi-select)
+  - Key: 'exclude_plants', Value: JSON array
+- Default Credit GL (optional)
+  - Key: 'default_credit_gl', Value: '50010011'
+
+**TAB 2: CSV UPLOAD & IMPORT**
+
+Upload Interface:
+- Drag & drop zone for CSV file
+- File validation: .csv only, max 50MB
+- After upload, show preview (first 10 rows)
+- Column mapping interface:
+  - Auto-detect common column names
+  - Manual dropdown mapping for each column
+  - Highlight required columns if missing
+- Validation before import:
+  - Check required columns present
+  - Validate data types (amounts are numbers, dates are valid)
+  - Show warnings (e.g., "5 rows have missing Start Dates")
+- Import button (disabled if validation fails)
+
+Import Process:
+1. Parse CSV with Papa Parse
+2. Classify POs: If Start Date AND End Date exist → Period, else → Activity
+3. Store in po_uploads table (metadata)
+4. Insert rows into po_lines table
+5. Parse GRN data: If PO has GRN info, create grn_transactions rows
+6. Log import in audit_log
+7. Show success message: "Imported 150 PO lines (89 Period, 61 Activity)"
+
+Import History Table:
+- Columns: Upload Date, File Name, Processing Month, Rows, Status
+- Actions: Download original file, View details, Delete (with confirmation)
+
+**TAB 3: ROLE PERMISSIONS MANAGEMENT**
+
+CRITICAL FEATURE: Finance Admin can configure what each role can do
+
+Interface:
+- Table view: 3 rows (one per role) × multiple permission columns
+- Columns represent modules/features
+- Each cell has checkboxes: View | Create | Edit | Delete | Approve
+
+Example:
+| Role | Period-Based | Activity-Based | Non-PO | Reports | Users | Config |
+|------|--------------|----------------|--------|---------|-------|--------|
+| Finance Admin | ✓ All | ✓ All | ✓ All | ✓ All | ✓ All | ✓ All |
+| Finance Approver | ✓ View, Edit* | ✓ View, Approve | ✓ View, Approve | ✓ View | ✓ View | ✓ View |
+| Business User | ✗ None | ✓ View Own, Respond | ✓ View Own, Submit | ✗ None | ✗ None | ✗ None |
+
+*Edit = Limited (can only add true-ups/remarks, not change core data)
+
+Stored in role_permissions table
+Frontend reads these to show/hide features dynamically
+
+**TAB 4: SYSTEM SETTINGS**
+
+- Approval Workflow:
+  - Multiple approver behavior (All must approve / Any one / Sequential)
+  - Overdue threshold (days)
+  - Auto-reminders enabled (checkbox)
+  - Escalation rules
+
+- Notification Settings:
+  - Email notifications enabled
+  - Reminder frequency
+  - Notification templates (view/edit)
+
+- Data Management:
+  - Export all data (JSON backup)
+  - Clear audit logs older than X months
+  - Database statistics (table sizes, row counts)
+
+═══════════════════════════════════════════════════════════════════════════
+PART 6: PERIOD-BASED ACCRUALS
+═══════════════════════════════════════════════════════════════════════════
+
+**PURPOSE:**
+Calculate monthly accrual provisions for POs with defined service periods (start/end dates)
+
+**WHO CAN ACCESS:**
+- Finance Admin: Full access
+- Finance Approver: View + Edit (true-ups/remarks only)
+- Business User: No access
+
+**PAGE LAYOUT:**
+
+Header:
+- Title: "Period-Based Accruals"
+- Processing Month badge: "Feb 2026"
+- Buttons: [Filters] [Download CSV] [Upload CSV (Admin only)]
+
+Data Table:
+Columns (in order):
+1. PO Number (sticky left column)
+2. Line Item
+3. Vendor Name
+4. Description (truncated)
+5. Net Amount (₹)
+6. GL Account
+7. Cost Center
+8. Profit Center
+9. Plant
+10. Start Date
+11. End Date
+12. Total Days (calculated)
+
+PREVIOUS MONTH SECTION (light gray background):
+13. Prev Month Days (calculated)
+14. Prev Month Provision (calculated)
+15. Prev Month True-up (editable - Finance only)
+16. Prev Month GRN (from grn_transactions)
+17. Carry Forward (calculated: Prev Prov + Prev True-up - Prev GRN)
+
+CURRENT MONTH SECTION (light blue background):
+18. Current Month Days (calculated)
+19. Suggested Provision (calculated)
+20. Current Month GRN (from grn_transactions)
+21. Current Month True-up (editable - Finance only)
+22. Remarks (editable - Finance only)
+
+FINAL (bold, large):
+23. Final Provision (Suggested + Carry Forward + True-up - Current GRN)
+24. Status (badge: Draft/Reviewed/Approved)
+
+Footer:
+- Summary row showing totals for key columns
+
+**CALCULATION LOGIC:**
+
+For each PO line where category = 'Period':
+Total Service Days = Days between Start Date and End Date (inclusive)
+Previous Month (e.g., Jan 2026):
+
+Calculate days service period overlaps with Jan 2026
+Prev Month Provision = (Net Amount / Total Service Days) × Prev Month Days
+Prev Month GRN = SUM(grn_value WHERE grn_date in Jan 2026 AND po_line matches)
+Prev Month True-up = From period_calculations table (user input)
+Carry Forward = Prev Provision + Prev True-up - Prev GRN
+
+Current Month (e.g., Feb 2026):
+
+Calculate days service period overlaps with Feb 2026
+Suggested Provision = (Net Amount / Total Service Days) × Current Month Days
+Current Month GRN = SUM(grn_value WHERE grn_date in Feb 2026 AND po_line matches)
+Current Month True-up = From period_calculations table (user input)
+
+Final Provision = Suggested + Carry Forward + Current True-up - Current GRN
+
+**EDITABLE CELLS:**
+
+Prev Month True-up & Current Month True-up:
+- Click to edit (inline input)
+- On blur: Save to period_calculations table
+- If non-zero: Remarks become mandatory
+- Auto-recalculate Final Provision
+
+Remarks:
+- Click to open textarea modal
+- Save to period_calculations table
+- Show icon if remarks exist
+
+**ROW COLOR CODING:**
+
+- Green tint: No adjustments (true-ups = 0)
+- Yellow tint: Has true-up adjustments
+- Red tint: Exception (negative final provision, missing dates, GRN > Net Amount)
+- Gray tint: Fully cleared (Final Provision = 0)
+
+**FILTERS PANEL (slide from right):**
+
+Filters:
+- Vendor (searchable multi-select)
+- GL Account (searchable multi-select)
+- Cost Center (multi-select)
+- Profit Center (multi-select)
+- Plant (multi-select)
+- Amount Range (dual slider: min to max)
+- Exception Toggles:
+  □ Show only negative provisions
+  □ Show only zero provisions
+  □ Show only with true-ups
+  □ Show only missing dates
+  □ Show only GRN mismatches
+
+Apply filters client-side for instant response
+
+**ACTIONS:**
+
+Row Actions (dropdown):
+- View Calculation Breakdown (modal showing step-by-step math)
+- Edit Core Data (Admin only: GL, CC, Start/End dates)
+- Mark as Reviewed
+- Add to Exception Report
+
+Bulk Actions (checkbox select):
+- Download Selected (CSV)
+- Mark as Reviewed (batch update status)
+- Bulk Edit (modal for mass updates)
+
+**DATABASE OPERATIONS:**
+
+Reads from:
+- po_lines (main data)
+- grn_transactions (GRN values)
+- period_calculations (user inputs: true-ups, remarks)
+
+Writes to:
+- period_calculations (on true-up or remark edit)
+
+═══════════════════════════════════════════════════════════════════════════
+PART 7: ACTIVITY-BASED ACCRUALS (DYNAMIC BY ROLE)
+═══════════════════════════════════════════════════════════════════════════
+
+**PURPOSE:**
+Handle POs without complete start/end dates that require business user input
+
+**THREE DIFFERENT VIEWS BASED ON ROLE:**
+
+**VIEW 1: FINANCE ADMIN (Assignment & Management)**
+
+Tab Structure:
+→ Tab A: Assignment & Tracking
+→ Tab B: Response Summary
+→ Tab C: Final Approval
+
+**TAB A: ASSIGNMENT & TRACKING**
+
+Shows all activity-based POs (category = 'Activity')
+
+Table Columns:
+1. PO Number, Line, Vendor, Description, Net Amount
+2. GL, Cost Center, Profit Center, Plant
+3. PR Owner ID, CC Owner ID
+4. Suggested Approvers (pills - from cost center mapping + approval rules)
+5. Assigned To (multi-select users dropdown - editable)
+6. Primary Approver (radio button)
+7. Assignment Date
+8. Status Badge (Not Assigned / Assigned / Responded / Overdue)
+9. Days Pending (calculated from assignment date)
+10. Actions
+
+Suggested Approvers Logic:
+1. Check cost_center_assignments: Get users assigned to this PO's cost center
+2. Apply approval_rules: Check if any rules match this PO
+3. Combine and show as suggestions
+4. Finance can accept or manually select different users
+
+Assignment Actions:
+- Bulk Select → "Assign to User" button → Select user → Save
+- Auto-assign button (uses suggestions for all unassigned)
+- Send notification to assigned users
+
+**TAB B: RESPONSE SUMMARY**
+
+Shows all activity POs that have business user responses
+
+Table Columns:
+1. PO details (read-only)
+2. Assigned To
+3. Business User Response:
+   - Completion Status (Not Started/In Progress/Completed/Discontinue)
+   - Provision Amount (user entered)
+   - Comments
+   - Response Date
+4. Finance Review:
+   - Finance True-up (editable)
+   - Finance Remarks (editable)
+   - Final Provision (calculated: Business Amount + True-up)
+5. Status, Actions
+
+Actions:
+- Return to Business User (with comments)
+- Approve
+- Download
+
+**VIEW 2: FINANCE APPROVER**
+
+Same as Finance Admin but:
+- Cannot assign (Tab A read-only except Approve action)
+- Can add Finance True-up and Remarks in Tab B
+- Can Approve final provisions
+
+**VIEW 3: BUSINESS USER (My Tasks View)**
+
+Completely different UI - card-based, simple
+
+Shows ONLY POs assigned to current user:
+```sql
+SELECT * FROM activity_assignments 
+WHERE assigned_to_user_id = current_user_id 
+AND status IN ('Assigned', 'Overdue')
+```
+
+Layout:
+- Dashboard-style cards (2-3 per row)
+- Each card represents one PO assignment
+
+Card Design:
+┌─────────────────────────────────────┐
+│ 🔵 PO: 3000002025-10                │
+│ Vendor: XYZ Corp                    │
+│ Description: Consulting Services    │
+│ Amount: ₹850,000                    │
+│ Assigned: 2 days ago                │
+│ ⚠️ Due in 1 day                     │
+├─────────────────────────────────────┤
+│ Completion Status:                  │
+│ ○ Not Started                       │
+│ ○ In Progress                       │
+│ ○ Completed                         │
+│ ○ Discontinue                       │
+│                                      │
+│ [If In Progress selected]           │
+│ Provision Amount: ₹_______          │
+│ OR Provision %: % (0-100)        │
+│                                      │
+│ [If Completed selected]             │
+│ Provision Amount: ₹____          │
+│ (defaults to ₹850,000)              │
+│                                      │
+│ Comments: [Text area]               │
+│ Attachments: [📎 Upload]            │
+│                                      │
+│ [Submit Response] [Ask Finance]     │
+└─────────────────────────────────────┘
+
+Business User Actions:
+1. Select completion status
+2. If "In Progress": Enter amount OR percentage
+   - Validation: Cannot exceed Net Amount
+   - If % entered: Auto-calculate amount
+3. If "Completed": Enter amount (defaults to Net Amount)
+4. If "Not Started" or "Discontinue": Provision = 0
+5. Add comments (optional but recommended)
+6. Upload supporting docs (optional)
+7. Click Submit
+
+On Submit:
+- Save to business_responses table
+- Update activity_assignments status to 'Responded'
+- Create notification for finance user
+- Show success message
+
+Ask Finance Button:
+- Opens simple message form
+- Sends question to finance
+- Updates status to show "Awaiting Clarification"
+
+**DATABASE FLOW:**
+
+Assignment (Finance Admin):
+1. Insert into activity_assignments
+2. Link po_line_id, assigned_to_user_id, assigned_by
+3. Create notification for business user
+
+Response (Business User):
+1. Insert into business_responses
+2. Link assignment_id, completion_status, provision_amount
+3. Update activity_assignments.status to 'Responded'
+4. Create notification for finance
+
+Final (Finance):
+1. Add finance_true_up and finance_remarks to business_responses
+2. Calculate final_provision
+3. Update status to 'Approved'
+
+═══════════════════════════════════════════════════════════════════════════
+PART 8: NON-PO ACCRUALS (FORM BUILDER)
+═══════════════════════════════════════════════════════════════════════════
+
+**PURPOSE:**
+Create custom forms for ad-hoc accruals (not tied to POs)
+
+**WHO CAN ACCESS:**
+- Finance Admin: Create forms, assign, review, approve
+- Finance Approver: Review and approve only
+- Business User: Submit assigned forms only
+
+**FOUR TABS:**
+
+**TAB 1: FORM BUILDER (Finance Admin only)**
+
+Purpose: Create flexible, reusable forms
+
+Interface:
+
+LEFT PANEL (Form Configuration):
+
+1. Form Metadata:
+   - Form Name (text)
+   - Description (textarea)
+   - Due Date (date picker)
+   - Priority (Low/Medium/High)
+
+2. Default Fields Section:
+   - List of standard fields from PO structure
+   - Each field has checkbox + visibility dropdown
+   
+   Available fields:
+   □ Vendor Name/Service Category [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Service Description [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Provision Amount [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Currency [Required ▼ / Optional ▼ / Hidden ▼]
+   □ GL Account [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Cost Center [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Profit Center [Required ▼ / Optional ▼ / Hidden ▼]
+   □ WBS Element [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Plant [Required ▼ / Optional ▼ / Hidden ▼]
+   □ Project Name [Required ▼ / Optional ▼ / Hidden ▼]
+
+3. Custom Fields Section:
+   - "Add Custom Field" button → Opens modal
+
+   Custom Field Modal:
+   - Field Name (text)
+   - Field Type (dropdown):
+     • Text (single line)
+     • Number
+     • Date
+     • Date Range
+     • Dropdown (with options input)
+     • Multi-select
+     • File Upload
+     • Long Text (textarea)
+   - Required (checkbox)
+   - Default Value (optional)
+   - Help Text (optional)
+   
+   After adding: Shows list of custom fields with Edit/Delete
+
+4. User Assignment:
+   - Shows suggested users (from cost center mapping)
+   - Search box to add more users
+   - Natural language input: "Send to all Cost Center Heads in Plant 4003"
+     → Parse and match users
+   - Selected users shown as chips
+   - Can add/remove users
+
+5. Actions:
+   - [Preview Form] - Shows right panel preview
+   - [Save as Template] - Store with is_template = 1
+   - [Send to Users] - Save form + create assignments + notify
+
+RIGHT PANEL (Live Preview):
+- Shows exactly how form will appear to business users
+- Updates in real-time as configuration changes
+- Includes all visible fields, custom fields
+- Shows validation rules
+
+Storage:
+```sql
+nonpo_forms table:
+- field_configuration: JSON object
+{
+  "defaultFields": {
+    "vendorName": {"visible": true, "required": true},
+    "provisionAmount": {"visible": true, "required": true},
+    "glAccount": {"visible": true, "required": false},
+    "plant": {"visible": false, "required": false}
+  },
+  "customFields": [
+    {
+      "id": "cf1",
+      "name": "Invoice Number",
+      "type": "text",
+      "required": true,
+      "helpText": "Enter invoice number if available"
+    },
+    {
+      "id": "cf2",
+      "name": "Service Period",
+      "type": "dateRange",
+      "required": false
+    }
+  ]
+}
+```
+
+**TAB 2: BUSINESS USER RESPONSE (Dynamic Form)**
+
+Business users see ONLY forms assigned to them:
+```sql
+SELECT f.* FROM nonpo_forms f
+JOIN nonpo_form_assignments a ON f.id = a.form_id
+WHERE a.assigned_to_user_id = current_user_id
+```
+
+Renders form dynamically based on field_configuration JSON:
+- Loop through defaultFields: If visible = true, render appropriate input
+- Loop through customFields: Render based on field type
+- Apply required/optional validation
+- File uploads: Store in uploads/ folder, save paths to attachments JSON
+- On submit: Save to nonpo_submissions table
+
+**TAB 3: FINANCE REVIEW (Finance Admin/Approver)**
+
+Shows all Non-PO submissions
+
+Table Columns:
+1. Submission ID
+2. Form Name
+3. Submitted By (user name)
+4. Submission Date
+5. Standard Fields (show key fields: Vendor, Amount, GL, CC)
+6. Custom Fields (button to view in modal)
+7. Attachments (download links)
+8. Finance Section (editable):
+   - Finance True-up
+   - Finance Remarks
+   - Final Provision (calculated: Submitted Amount + True-up)
+9. Status, Actions
+
+Custom Fields Modal:
+- Shows all custom field responses in formatted view
+- Example:
+Invoice Number: INV-2026-0045
+Service Period: Feb 1, 2026 - Feb 28, 2026
+Department: Engineering
+
+Actions:
+- Approve (sets status to Approved)
+- Return to User (with comments)
+- Download attachments
+
+**TAB 4: FORM TEMPLATES**
+
+Shows saved form templates (is_template = 1)
+
+Card-based layout:
+Each card shows:
+- Template Name
+- Last Used Date
+- Field Count (e.g., "8 fields")
+- Actions: [Use] [Edit] [Duplicate] [Delete]
+
+"Use" button:
+- Loads template into Form Builder
+- Pre-fills all configuration
+- User can modify and save as new form
+
+═══════════════════════════════════════════════════════════════════════════
+PART 9: APPROVAL RULES (NATURAL LANGUAGE)
+═══════════════════════════════════════════════════════════════════════════
+
+**PURPOSE:**
+Auto-suggest approvers based on PO attributes using natural language rules
+
+**WHO CAN ACCESS:**
+- Finance Admin: Full access
+- Finance Approver: View only
+- Business User: No access
+
+**TAB 1: RULE BUILDER**
+
+Interface: Chat-like, simple
+
+Large textarea:
+💬 Describe your approval rule:
+┌──────────────────────────────────────────┐
+│ [Type natural language rule here...]     │
+│                                           │
+│ Example:                                  │
+│ "All POs for Cost Center 40030403        │
+│  should go to Jane Smith"                │
+└──────────────────────────────────────────┘
+[🔍 Interpret Rule] button
+
+After clicking Interpret Rule:
+
+Display parsed interpretation:
+✅ Rule Understood
+Condition: Cost Center = 40030403
+Action: Assign to Jane Smith (jane@company.com)
+Applies to: Activity-based POs, Non-PO Accruals
+Priority: Normal
+[Edit Details] [🧪 Test Rule] [💾 Save Rule]
+
+Rule Parsing Logic (simplified):
+- Extract conditions using regex/keywords
+- Extract assignees
+- Store as JSON in approval_rules table
+
+Example patterns to parse:
+- "cost center 40030403" → {field: 'costCenter', operator: '=', value: '40030403'}
+- "amount over ₹500000" → {field: 'netAmount', operator: '>', value: 500000}
+- "gl account 44010011" → {field: 'glAccount', operator: '=', value: '44010011'}
+- "plant 4003" → {field: 'plant', operator: '=', value: '4003'}
+- "to Jane Smith" → {assignTo: ['jane@company.com']}
+
+Test Rule:
+- Shows sample POs from database
+- Highlights which ones match the condition
+- Shows count: "This rule will affect 12 POs"
+
+Save:
+- Insert into approval_rules table
+- Set priority based on order (can drag-drop later)
+
+**TAB 2: ACTIVE RULES LIST**
+
+Table with drag-drop reordering:
+
+Columns:
+1. 🔢 Priority (drag handle to reorder)
+2. Rule Name
+3. Natural Language Text (original input)
+4. Conditions (formatted display of JSON)
+5. Assigns To (user name badges)
+6. Applies To (Activity/NonPO/Both)
+7. Status (Active toggle switch)
+8. Actions (Edit, Test, Delete)
+
+Priority System:
+- Rules evaluated in order (1 = highest)
+- If multiple rules match same PO:
+  - Option A: Combine all suggestions
+  - Option B: Use only highest priority
+  - Configurable in system settings
+
+**TAB 3: RULE SUGGESTIONS (AI-Powered - Optional)**
+
+Analyze historical assignment patterns:
+```sql
+SELECT po_line_id, assigned_to_user_id, COUNT(*) as frequency
+FROM activity_assignments
+GROUP BY po_line_id, assigned_to_user_id
+HAVING frequency > 5
+```
+
+Show suggestion cards:
+💡 Suggested Rules
+You frequently assign Plant 4003 POs to Mike Johnson
+→ [Create Rule] [Dismiss]
+Jane Smith approves 85% of GL 44010011 accruals
+→ [Create Rule] [Dismiss]
+
+**RULE APPLICATION:**
+
+When Finance Admin assigns activity-based PO:
+1. Query approval_rules WHERE is_active = 1 ORDER BY priority
+2. For each rule, check if PO matches conditions
+3. Collect all matching assignees
+4. Display as "💡 Suggested Approvers" in UI
+5. Finance can accept or override
+
+═══════════════════════════════════════════════════════════════════════════
+PART 10: REPORTS & ANALYTICS
+═══════════════════════════════════════════════════════════════════════════
+
+**WHO CAN ACCESS:**
+- Finance Admin: Full access
+- Finance Approver: Full access
+- Business User: No access
+
+**TAB 1: COMBINED ACCRUAL REPORT**
+
+Generate comprehensive Excel report with multiple sheets:
+
+Sheet 1: Summary
+- Total by Category (Period/Activity/Non-PO)
+- Total by GL Account (top 10)
+- Total by Cost Center (top 10)
+- Total by Profit Center
+- Total by Plant
+- Total by Vendor (top 10)
+
+Sheet 2: Period-Based Detail
+- All columns from Period-Based Accruals page
+- All calculations visible
+
+Sheet 3: Activity-Based Detail
+- PO details + Assigned to + Response + Final provision
+
+Sheet 4: Non-PO Detail
+- All submissions with standard and custom fields
+
+Sheet 5: GRN Analysis
+- PO Number, Line
+- Net Amount
+- Total GRN to Date
+- Current Month GRN
+- Previous Month GRN
+- Remaining Open Amount
+
+Export Options:
+- [Download Excel] (generates .xlsx)
+- [Download CSV] (multiple CSV files in zip)
+- [Download PDF] (formatted report)
+
+Filters:
+- Date Range
+- Category
+- Status
+- Cost Center
+- GL Account
+
+**TAB 2: EXCEPTION DASHBOARD**
+
+Card-based layout (2x4 grid):
+
+Each exception card shows:
+- Icon + Color
+- Exception Type
+- Count
+- Total Value
+- [View Details] button
+
+Exception Types:
+1. 🔴 Missing Start/End Dates
+2. 🔴 Negative Final Provisions
+3. 🟡 Zero Provisions (non-GRN cleared)
+4. 🟡 Large True-ups (>20% of suggested)
+5. 🟡 GRN > Net Amount
+6. 🔴 Activity POs Not Assigned
+7. 🔴 Overdue Approvals (>3 days)
+8. 🟡 Non-PO Missing Required Fields
+
+Click "View Details" → Shows filtered data table with only problem rows
+
+Export Exceptions: Download CSV of all exceptions
+
+**TAB 3: ANALYTICS DASHBOARD**
+
+Beautiful charts for insights:
+
+Row 1 (2 charts):
+1. Month-over-Month Provision Trend (Line Chart)
+   - X: Last 6-12 months
+   - Y: Total Provision Amount
+   - Multiple lines: Period/Activity/Non-PO
+
+2. Provision vs Actual GRN (Stacked Bar)
+   - Compare provision amounts to actual GRN received
+   - Show variance
+
+Row 2 (3 charts):
+3. Top 10 Vendors by Provision (Horizontal Bar)
+4. Top 10 GL Accounts by Provision (Horizontal Bar)
+5. Top 10 Cost Centers by Provision (Horizontal Bar)
+
+Row 3 (2 charts):
+6. Approval Cycle Time (Line Chart)
+   - Average days from assignment to approval
+   - Track over time
+
+7. Response Rate Distribution (Donut Chart)
+   - Not Started / In Progress / Completed
+
+Summary Stats Cards:
+- Average Provision per PO
+- Average Response Time (Activity-based)
+- Completion Rate (%)
+- Most Active User
+
+Data Source:
+- Query database for aggregated metrics
+- Cache results for performance
+- Refresh on page load
+
+═══════════════════════════════════════════════════════════════════════════
+PART 11: KEY IMPLEMENTATION DETAILS
+═══════════════════════════════════════════════════════════════════════════
+
+**CRITICAL BACKEND ROUTES:**
+
+Authentication:
+- POST /api/auth/login
+- GET /api/auth/me (with token)
+- POST /api/auth/logout
+- POST /api/auth/change-password
+
+Users:
+- GET /api/users (list, with role filtering)
+- POST /api/users (create, Admin only)
+- PUT /api/users/:id (update, Admin only)
+- DELETE /api/users/:id (soft delete, Admin only)
+- POST /api/users/:id/roles (assign roles, Admin only)
+- POST /api/users/:id/cost-centers (assign CCs, Admin only)
+
+PO Lines:
+- POST /api/po/upload (CSV upload, Admin only)
+- GET /api/po/lines (list with filters)
+- GET /api/po/lines/:id (single)
+- PUT /api/po/lines/:id (update)
+- POST /api/po/calculate (trigger calculations)
+
+Period-Based:
+- GET /api/period-based (list)
+- PUT /api/period-based/:id/true-up (update true-up)
+- PUT /api/period-based/:id/remarks (update remarks)
+
+Activity-Based:
+- GET /api/activity-based (list, filtered by role)
+- POST /api/activity-based/assign (create assignments)
+- GET /api/activity-based/my-tasks (Business User)
+- POST /api/activity-based/respond (Business User)
+- PUT /api/activity-based/:id/finance-review (Finance)
+- PUT /api/activity-based/:id/approve (Approver)
+
+Non-PO:
+- GET /api/non-po/forms (list)
+- POST /api/non-po/forms (create form)
+- POST /api/non-po/forms/:id/assign (assign to users)
+- GET /api/non-po/my-forms (Business User)
+- POST /api/non-po/submit (Business User)
+- GET /api/non-po/submissions (Finance)
+- PUT /api/non-po/submissions/:id/review (Finance)
+
+Approval Rules:
+- GET /api/rules (list)
+- POST /api/rules (create)
+- POST /api/rules/parse (parse natural language)
+- PUT /api/rules/:id (update)
+- DELETE /api/rules/:id (delete)
+- POST /api/rules/test (test against data)
+
+Reports:
+- GET /api/reports/combined (generate Excel)
+- GET /api/reports/exceptions (list)
+- GET /api/reports/analytics (metrics)
+
+Config:
+- GET /api/config (list all settings)
+- PUT /api/config/:key (update setting)
+- GET /api/config/permissions (role permissions)
+- PUT /api/config/permissions (update permissions)
+
+**MIDDLEWARE USAGE:**
+
+All protected routes use:
+router.get('/api/period-based',
+authMiddleware,
+requirePermission('period_based.view'),
+controller.list
+);
+router.put('/api/period-based/:id/true-up',
+authMiddleware,
+requirePermission('period_based.edit'),
+controller.updateTrueUp
+);
+
+**FRONTEND API CALLS:**
+
+Create service layer:
+- authService.ts (login, logout, getCurrentUser)
+- poService.ts (upload, list, update)
+- userService.ts (CRUD operations)
+- activityService.ts (assignments, responses)
+- nonPOService.ts (forms, submissions)
+- ruleService.ts (rules CRUD)
+- reportService.ts (generate reports)
+
+All calls include Authorization header:
+headers: {
+'Authorization': Bearer ${token}
+}
+
+**ERROR HANDLING:**
+
+Backend:
+- Catch all errors
+- Return consistent format:
+```json
+  {
+    "error": "User-friendly message",
+    "code": "ERROR_CODE",
+    "details": {} // optional
+  }
+```
+
+Frontend:
+- Show toast notifications for errors
+- Handle 401 (expired token) → Redirect to login
+- Handle 403 (forbidden) → Show "Insufficient permissions"
+
+**NOTIFICATIONS:**
+
+Create notification on:
+- Activity-based PO assigned to user
+- Non-PO form assigned to user
+- Business user submits response
+- Response approved/rejected
+- Reminder for overdue items
+
+Store in notifications table
+Show badge with count in top nav
+Mark as read when clicked
+
+**AUDIT LOGGING:**
+
+Log all important actions:
+- User login/logout
+- User created/updated/deleted
+- Role assigned/removed
+- PO uploaded
+- Provision edited
+- Activity assigned
+- Response submitted
+- Approval granted
+
+Store in audit_log table
+Include: user_id, action, entity_type, entity_id, details (JSON), timestamp, ip_address
+
+**PERFORMANCE:**
+
+- Index all foreign keys
+- Paginate large lists (50 items per page)
+- Cache system_config in memory
+- Lazy load charts on Reports page
+- Debounce search inputs (300ms)
+- Virtualize large tables (react-window)
+
+**SECURITY:**
+
+- All passwords bcrypt hashed (10 rounds)
+- JWT tokens expire after 24 hours
+- CORS configured for frontend domain only
+- SQL injection protection (parameterized queries)
+- XSS protection (sanitize inputs)
+- File upload validation (type, size)
+- Role checking on every API call
+
+═══════════════════════════════════════════════════════════════════════════
+PART 12: INITIAL DATA SEEDING
+═══════════════════════════════════════════════════════════════════════════
+
+Create seed script to populate database with:
+
+**DEMO USERS:**
+
+1. Finance Admin
+   - Email: admin@company.com
+   - Password: Admin@123
+   - Roles: Finance Admin
+
+2. Finance Approver
+   - Email: approver@company.com
+   - Password: Approver@123
+   - Roles: Finance Approver
+   - Cost Centers: 40030403, 40030405
+
+3. Business User
+   - Email: user@company.com
+   - Password: User@123
+   - Roles: Business User
+   - Cost Centers: 40030403
+
+**SAMPLE PO DATA:**
+
+50 PO lines:
+- 30 Period-based (with start/end dates)
+- 20 Activity-based (missing dates)
+
+Mix of:
+- Different vendors, plants, cost centers
+- Various amounts (₹10K to ₹5M)
+- Some with GRN data, some without
+- Various service periods
+
+**SYSTEM CONFIG:**
+
+Insert default values:
+- processing_month: "Feb 2026"
+- threshold_amount: "0"
+- default_credit_gl: ""
+
+**ROLE PERMISSIONS:**
+
+Insert default permissions for all 3 roles
+Populate role_permissions table with checkboxes configuration
+
+**SAMPLE APPROVAL RULES:**
+
+3 example rules:
+- "All POs for Cost Center 40030403 go to approver@company.com"
+- "POs over ₹500000 need admin approval"
+- "GL Account 44010011 goes to approver@company.com"
+
+═══════════════════════════════════════════════════════════════════════════
+PART 13: UI/UX REQUIREMENTS
+═══════════════════════════════════════════════════════════════════════════
+
+**DESIGN SYSTEM:**
+
+Colors:
+- Primary: Blue-600 (#2563EB)
+- Success: Green-600 (#16A34A)
+- Warning: Orange-600 (#EA580C)
+- Error: Red-600 (#DC2626)
+- Gray: Slate palette (50-900)
+
+Typography:
+- Font: Inter or system fonts
+- Headings: Bold, Gray-900
+- Body: Regular, Gray-700
+- Small: Text-sm, Gray-600
+
+Components:
+- Cards: White background, rounded-xl, shadow-sm, border-gray-100
+- Buttons: Rounded-lg, px-4 py-2, font-medium
+- Inputs: Rounded-lg, border-gray-300, focus:ring-2 focus:ring-blue-500
+- Tables: Rounded-lg overflow, sticky headers
+- Badges: Rounded-full, px-2 py-1, text-xs
+
+Spacing:
+- Page padding: 32px (p-8)
+- Card padding: 24px (p-6)
+- Section gaps: 24-32px (gap-6 to gap-8)
+- Form field gaps: 16px (gap-4)
+
+**RESPONSIVE:**
+
+Breakpoints:
+- Mobile: < 768px (sm:)
+- Tablet: 768-1024px (md:)
+- Desktop: > 1024px (lg:)
+
+Layout adjustments:
+- Sidebar: Hidden on mobile (hamburger menu)
+- Cards: Stack vertically on mobile
+- Tables: Horizontal scroll on mobile
+- Forms: Single column on mobile
+
+**LOADING STATES:**
+
+- Show spinner when:
+  - Logging in
+  - Loading data
+  - Calculating provisions
+  - Uploading CSV
+  - Generating reports
+
+- Skeleton screens for:
+  - Dashboard cards
+  - Tables
+  - Charts
+
+**EMPTY STATES:**
+
+- No PO data: Show upload prompt
+- No assignments: "No tasks assigned"
+- No forms: "No forms assigned"
+- No notifications: "You're all caught up!"
+
+**CONFIRMATION DIALOGS:**
+
+Show confirmation before:
+- Deleting users
+- Deleting approval rules
+- Bulk actions
+- Irreversible operations
+
+**TOAST NOTIFICATIONS:**
+
+Success (green):
+- "User created successfully"
+- "Provision saved"
+- "CSV imported"
+
+Error (red):
+- "Failed to save"
+- "Invalid credentials"
+- "Upload failed"
+
+Info (blue):
+- "Calculating provisions..."
+- "Processing..."
+
+**ACCESSIBILITY:**
+
+- Proper ARIA labels
+- Keyboard navigation
+- Focus indicators
+- Screen reader support
+- Color contrast (WCAG AA)
+
+═══════════════════════════════════════════════════════════════════════════
+DEPLOYMENT ON REPLIT
+═══════════════════════════════════════════════════════════════════════════
+
+**.replit file:**
+```toml
+run = "npm run dev"
+entrypoint = "server/src/index.ts"
+
+[nix]
+channel = "stable-22_11"
+
+[deployment]
+run = ["sh", "-c", "npm run build && npm start"]
+```
+
+**replit.nix:**
+```nix
+{ pkgs }: {
+  deps = [
+    pkgs.nodejs-18_x
+    pkgs.nodePackages.typescript
+    pkgs.sqlite
+  ];
+}
+```
+
+**package.json scripts:**
+```json
+{
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "nodemon server/src/index.ts",
+    "client:dev": "cd client && vite",
+    "build": "npm run client:build && npm run server:build",
+    "start": "node server/dist/index.js"
+  }
+}
+```
+
+**Environment Variables (Secrets in Replit):**
+
+- JWT_SECRET=<random-secure-string>
+- DATABASE_PATH=./database/accruals.db
+- UPLOAD_DIR=./server/uploads
+- NODE_ENV=production
+
+**Database Initialization:**
+
+Create script: server/src/init-db.ts
+- Run on first startup
+- Creates tables if not exist
+- Seeds initial data
+- Check: `IF NOT EXISTS users table → seed`
+
+═══════════════════════════════════════════════════════════════════════════
+BUILD THIS COMPLETE APPLICATION
+
+Key Points:
+✓ SQLite database - all data persists
+✓ JWT authentication - no data cleared on logout
+✓ Role-based access - dynamic views per user
+✓ Multiple roles per user - permissions are additive
+✓ User onboarding - Finance Admin can create users
+✓ Role configuration - Admin can manage permissions in UI
+✓ Comprehensive audit trail
+✓ Professional UI with Tailwind + shadcn/ui
+✓ Production-ready with proper error handling
+
+Start with:
+1. Database schema creation
+2. Authentication system
+3. User management
+4. Then build each module progressively
+
+Make it beautiful, functional, and scalable!
+═══════════════════════════════════════════════════════════════════════════
