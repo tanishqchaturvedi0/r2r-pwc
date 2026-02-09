@@ -87,7 +87,7 @@ export async function registerRoutes(
     try {
       const { role, permission, field, value } = req.body;
       if (!role || !permission || !field) return res.status(400).json({ message: "role, permission, and field are required" });
-      const validFields = ["canView", "canCreate", "canEdit", "canDelete", "canApprove"];
+      const validFields = ["canView", "canCreate", "canEdit", "canDelete", "canApprove", "canDownload", "canInvite"];
       if (!validFields.includes(field)) return res.status(400).json({ message: "Invalid field" });
       const result = await storage.updatePermission(role, permission, field, !!value);
       await storage.logAudit(req.userId!, "Update Permission", "permission", `${role}:${permission}:${field}=${value}`);

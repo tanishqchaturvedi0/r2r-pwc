@@ -237,8 +237,12 @@ function RolePermissionsConfig() {
   const togglePermission = useMutation({
     mutationFn: (params: { role: string; permission: string; field: string; value: boolean }) =>
       apiPut("/api/config/permissions", params),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/config/permissions"] });
+      toast({
+        title: "Permission updated",
+        description: `${variables.field.replace("can", "")} permission ${variables.value ? "enabled" : "disabled"} for ${variables.role}`,
+      });
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
@@ -256,14 +260,39 @@ function RolePermissionsConfig() {
     config: "Configuration",
   };
 
-  const uploadPoFeatures = ["period_based", "activity_based", "non_po"];
-
-  const actionFields = [
-    { key: "canView", label: "View" },
-    { key: "canCreate", label: "Upload PO", altLabel: "Create" },
-    { key: "canEdit", label: "Edit" },
-    { key: "canApprove", label: "Approve" },
-  ];
+  const featureActions: Record<string, { key: string; label: string }[]> = {
+    period_based: [
+      { key: "canView", label: "View" },
+      { key: "canCreate", label: "Upload PO" },
+      { key: "canEdit", label: "Edit" },
+      { key: "canApprove", label: "Approve" },
+    ],
+    activity_based: [
+      { key: "canView", label: "View" },
+      { key: "canCreate", label: "Upload PO" },
+      { key: "canEdit", label: "Edit" },
+      { key: "canApprove", label: "Approve" },
+    ],
+    non_po: [
+      { key: "canView", label: "View" },
+      { key: "canCreate", label: "Upload PO" },
+      { key: "canEdit", label: "Edit" },
+      { key: "canApprove", label: "Approve" },
+    ],
+    reports: [
+      { key: "canView", label: "View" },
+      { key: "canDownload", label: "Download" },
+    ],
+    users: [
+      { key: "canView", label: "View" },
+      { key: "canInvite", label: "Invite User" },
+      { key: "canEdit", label: "Edit" },
+    ],
+    config: [
+      { key: "canView", label: "View" },
+      { key: "canEdit", label: "Edit" },
+    ],
+  };
 
   const getPermission = (role: string, perm: string) => {
     return (data || []).find((p: any) => p.role === role && p.permission === perm);
@@ -277,7 +306,7 @@ function RolePermissionsConfig() {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
-        <h3 className="text-sm font-semibold">Role Permissions Matrix</h3>
+        <h3 className="text-sm font-semibold" data-testid="text-permissions-title">Role Permissions Matrix</h3>
         {!isFinanceAdmin && (
           <Badge variant="outline" className="text-[10px]">Read Only</Badge>
         )}
@@ -288,50 +317,50 @@ function RolePermissionsConfig() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[180px] sticky left-0 bg-background z-10">Feature / Module</TableHead>
+                  <TableHead className="min-w-[180px] sticky left-0 bg-background z-10" data-testid="col-feature">Feature / Module</TableHead>
                   {roles.map(role => (
-                    <TableHead key={role} className="text-center min-w-[160px]" data-testid={`col-role-${role.replace(/\s+/g, '-').toLowerCase()}`}>
+                    <TableHead key={role} className="text-center min-w-[180px]" data-testid={`col-role-${role.replace(/\s+/g, '-').toLowerCase()}`}>
                       <span className="text-xs font-semibold">{role}</span>
                     </TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {features.map(feature => (
-                  <TableRow key={feature} data-testid={`row-feature-${feature}`}>
-                    <TableCell className="font-medium text-sm sticky left-0 bg-background z-10">
-                      {featureLabels[feature]}
-                    </TableCell>
-                    {roles.map(role => {
-                      const p = getPermission(role, feature);
-                      return (
-                        <TableCell key={role} className="text-center">
-                          <div className="flex flex-wrap gap-1.5 justify-center">
-                            {actionFields.map(action => {
-                              const isActive = !!(p as any)?.[action.key];
-                              const displayLabel = action.key === "canCreate" && uploadPoFeatures.includes(feature)
-                                ? action.label
-                                : action.key === "canCreate"
-                                  ? action.altLabel
-                                  : action.label;
-                              return (
-                                <Badge
-                                  key={action.key}
-                                  variant={isActive ? "default" : "outline"}
-                                  className={`text-[10px] cursor-pointer select-none toggle-elevate ${isActive ? "toggle-elevated" : ""} ${!isFinanceAdmin ? "cursor-default no-default-active-elevate" : ""}`}
-                                  onClick={() => handleToggle(role, feature, action.key, isActive)}
-                                  data-testid={`chip-${feature}-${role.replace(/\s+/g, '-').toLowerCase()}-${action.key}`}
-                                >
-                                  {displayLabel}
-                                </Badge>
-                              );
-                            })}
-                          </div>
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))}
+                {features.map(feature => {
+                  const actions = featureActions[feature];
+                  return (
+                    <TableRow key={feature} data-testid={`row-feature-${feature}`}>
+                      <TableCell className="font-medium text-sm sticky left-0 bg-background z-10" data-testid={`text-feature-${feature}`}>
+                        {featureLabels[feature]}
+                      </TableCell>
+                      {roles.map(role => {
+                        const p = getPermission(role, feature);
+                        return (
+                          <TableCell key={role} className="text-center py-3">
+                            <div className="flex flex-wrap gap-1.5 justify-center">
+                              {actions.map(action => {
+                                const isActive = !!(p as any)?.[action.key];
+                                return (
+                                  <Button
+                                    key={action.key}
+                                    size="sm"
+                                    variant={isActive ? "default" : "outline"}
+                                    disabled={!isFinanceAdmin}
+                                    onClick={() => handleToggle(role, feature, action.key, isActive)}
+                                    className="text-[10px] font-medium rounded-full"
+                                    data-testid={`chip-${feature}-${role.replace(/\s+/g, '-').toLowerCase()}-${action.key}`}
+                                  >
+                                    {action.label}
+                                  </Button>
+                                );
+                              })}
+                            </div>
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

@@ -235,6 +235,8 @@ export const rolePermissions = pgTable("role_permissions", {
   canEdit: boolean("can_edit").default(false),
   canDelete: boolean("can_delete").default(false),
   canApprove: boolean("can_approve").default(false),
+  canDownload: boolean("can_download").default(false),
+  canInvite: boolean("can_invite").default(false),
 }, (table) => [
   uniqueIndex("role_perm_unique_idx").on(table.role, table.permission),
 ]);

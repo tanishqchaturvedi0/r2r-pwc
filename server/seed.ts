@@ -102,20 +102,21 @@ export async function seedDatabase() {
   ]);
 
   const permissions = [
-    { role: "Finance Admin", permission: "period_based", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true },
-    { role: "Finance Admin", permission: "activity_based", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true },
-    { role: "Finance Admin", permission: "non_po", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true },
-    { role: "Finance Admin", permission: "reports", canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false },
-    { role: "Finance Admin", permission: "users", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: false },
-    { role: "Finance Admin", permission: "config", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: false },
-    { role: "Finance Approver", permission: "period_based", canView: true, canCreate: false, canEdit: true, canDelete: false, canApprove: true },
-    { role: "Finance Approver", permission: "activity_based", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: true },
-    { role: "Finance Approver", permission: "non_po", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: true },
-    { role: "Finance Approver", permission: "reports", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false },
-    { role: "Finance Approver", permission: "users", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false },
-    { role: "Finance Approver", permission: "config", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false },
-    { role: "Business User", permission: "activity_based", canView: true, canCreate: false, canEdit: true, canDelete: false, canApprove: false },
-    { role: "Business User", permission: "non_po", canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false },
+    { role: "Finance Admin", permission: "period_based", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canDownload: false, canInvite: false },
+    { role: "Finance Admin", permission: "activity_based", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canDownload: false, canInvite: false },
+    { role: "Finance Admin", permission: "non_po", canView: true, canCreate: true, canEdit: true, canDelete: true, canApprove: true, canDownload: false, canInvite: false },
+    { role: "Finance Admin", permission: "reports", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canDownload: true, canInvite: false },
+    { role: "Finance Admin", permission: "users", canView: true, canCreate: false, canEdit: true, canDelete: true, canApprove: false, canDownload: false, canInvite: true },
+    { role: "Finance Admin", permission: "config", canView: true, canCreate: false, canEdit: true, canDelete: false, canApprove: false, canDownload: false, canInvite: false },
+    { role: "Finance Approver", permission: "period_based", canView: true, canCreate: false, canEdit: true, canDelete: false, canApprove: true, canDownload: false, canInvite: false },
+    { role: "Finance Approver", permission: "activity_based", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: true, canDownload: false, canInvite: false },
+    { role: "Finance Approver", permission: "non_po", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: true, canDownload: false, canInvite: false },
+    { role: "Finance Approver", permission: "reports", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canDownload: true, canInvite: false },
+    { role: "Finance Approver", permission: "users", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canDownload: false, canInvite: false },
+    { role: "Finance Approver", permission: "config", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canDownload: false, canInvite: false },
+    { role: "Business User", permission: "activity_based", canView: true, canCreate: false, canEdit: true, canDelete: false, canApprove: false, canDownload: false, canInvite: false },
+    { role: "Business User", permission: "non_po", canView: true, canCreate: true, canEdit: true, canDelete: false, canApprove: false, canDownload: false, canInvite: false },
+    { role: "Business User", permission: "reports", canView: true, canCreate: false, canEdit: false, canDelete: false, canApprove: false, canDownload: false, canInvite: false },
   ];
   await db.insert(rolePermissions).values(permissions);
 

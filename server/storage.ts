@@ -489,6 +489,8 @@ export const storage = {
         canEdit: false,
         canDelete: false,
         canApprove: false,
+        canDownload: false,
+        canInvite: false,
         ...updateData,
       });
     }
