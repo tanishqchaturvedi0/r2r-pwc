@@ -592,6 +592,20 @@ export const storage = {
     return line;
   },
 
+  async createGrnTransaction(data: { poLineId: number; grnDate?: string; grnDoc?: string; grnMovementType?: string; grnValue?: number }) {
+    const [grn] = await db.insert(grnTransactions).values(data).returning();
+    return grn;
+  },
+
+  async clearAllPoData() {
+    await db.delete(businessResponses);
+    await db.delete(activityAssignments);
+    await db.delete(periodCalculations);
+    await db.delete(grnTransactions);
+    await db.delete(poLines);
+    await db.delete(poUploads);
+  },
+
   // Audit
   async logAudit(userId: number, action: string, entityType?: string, entityId?: string, details?: any) {
     await db.insert(auditLog).values({ userId, action, entityType, entityId, details });

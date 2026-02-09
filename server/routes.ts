@@ -368,45 +368,66 @@ export async function registerRoutes(
       const config = await storage.getConfigMap();
       const processingMonth = config.processing_month || "Feb 2026";
 
+      const trimmedRows = (result.data as any[]).map((row: any) => {
+        const trimmed: any = {};
+        for (const key of Object.keys(row)) {
+          trimmed[key.trim()] = row[key];
+        }
+        return trimmed;
+      });
+
       let periodCount = 0;
       let activityCount = 0;
 
-      for (const row of result.data as any[]) {
-        const startDate = row["Start Date"] || row["start_date"] || row["StartDate"] || "";
-        const endDate = row["End Date"] || row["end_date"] || row["EndDate"] || "";
+      for (const row of trimmedRows) {
+        const startDate = (row["Start Date"] || row["start_date"] || row["StartDate"] || "").toString().trim();
+        const endDate = (row["End Date"] || row["end_date"] || row["EndDate"] || "").toString().trim();
         const hasDates = startDate && endDate;
         const category = hasDates ? "Period" : "Activity";
 
         if (category === "Period") periodCount++;
         else activityCount++;
 
-        const poNumber = row["PO Number"] || row["po_number"] || row["PONumber"] || "";
-        const lineItem = row["Line Item"] || row["po_line_item"] || row["LineItem"] || row["PO Line Item"] || "";
+        const poNumber = (row["PO Number"] || row["po_number"] || row["PONumber"] || "").toString().trim();
+        const lineItem = (row["PO Line Item"] || row["Line Item"] || row["po_line_item"] || row["LineItem"] || "").toString().trim();
+        const uniqueId = (row["Unique ID"] || row["UniqueID"] || row["unique_id"] || `${poNumber}-${lineItem}`).toString().trim();
 
-        await storage.createPoLine({
+        const poLine = await storage.createPoLine({
           uploadId: null,
-          uniqueId: `${poNumber}-${lineItem}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          uniqueId: uniqueId || `${poNumber}-${lineItem}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           poNumber,
           poLineItem: lineItem,
-          vendorName: row["Vendor Name"] || row["vendor_name"] || row["VendorName"] || "",
-          itemDescription: row["Item Description"] || row["item_description"] || row["Description"] || "",
-          projectName: row["Project Name"] || row["project_name"] || "",
-          wbsElement: row["WBS Element"] || row["wbs_element"] || "",
-          costCenter: row["Cost Center"] || row["cost_center"] || row["CostCenter"] || "",
-          profitCenter: row["Profit Center"] || row["profit_center"] || "",
-          glAccount: row["GL Account"] || row["gl_account"] || row["GLAccount"] || "",
-          docType: row["Doc Type"] || row["doc_type"] || "",
+          vendorName: (row["Vendor Name"] || row["vendor_name"] || row["VendorName"] || "").toString().trim(),
+          itemDescription: (row["Item Description"] || row["item_description"] || row["Description"] || "").toString().trim(),
+          projectName: (row["Project Name"] || row["project_name"] || "").toString().trim(),
+          wbsElement: (row["WBS Element"] || row["wbs_element"] || "").toString().trim(),
+          costCenter: (row["Cost Center"] || row["cost_center"] || row["CostCenter"] || "").toString().trim(),
+          profitCenter: (row["ProfitCenter"] || row["Profit Center"] || row["profit_center"] || "").toString().trim(),
+          glAccount: (row["GL Account"] || row["gl_account"] || row["GLAccount"] || "").toString().trim(),
+          docType: (row["Doc. Type"] || row["Doc Type"] || row["doc_type"] || "").toString().trim(),
           startDate,
           endDate,
-          plant: row["Plant"] || row["plant"] || "",
-          netAmount: parseFloat(row["Net Amount"] || row["net_amount"] || row["NetAmount"] || "0") || 0,
-          prNumber: row["PR Number"] || row["pr_number"] || "",
-          prOwnerId: row["PR Owner ID"] || row["pr_owner_id"] || "",
-          costCenterOwnerId: row["CC Owner ID"] || row["cost_center_owner_id"] || "",
-          documentDate: row["Document Date"] || row["document_date"] || "",
+          plant: (row["Plant"] || row["plant"] || "").toString().trim(),
+          netAmount: parseFloat((row["Net Amount"] || row["net_amount"] || row["NetAmount"] || "0").toString().replace(/,/g, "")) || 0,
+          prNumber: (row["PR Number"] || row["pr_number"] || "").toString().trim(),
+          prOwnerId: (row["PR Owner Id"] || row["PR Owner ID"] || row["pr_owner_id"] || "").toString().trim(),
+          costCenterOwnerId: (row["CostCenter Owner Id"] || row["CC Owner ID"] || row["cost_center_owner_id"] || "").toString().trim(),
+          documentDate: (row["Document Date"] || row["document_date"] || "").toString().trim(),
           category,
           status: "Draft",
         });
+
+        const grnDoc = (row["GRN Doc"] || row["grn_doc"] || "").toString().trim();
+        const grnValue = parseFloat((row["GRN Value"] || row["grn_value"] || "0").toString().replace(/,/g, "")) || 0;
+        if (grnDoc || grnValue > 0) {
+          await storage.createGrnTransaction({
+            poLineId: poLine.id,
+            grnDate: (row["GRN Date"] || row["grn_date"] || "").toString().trim(),
+            grnDoc,
+            grnMovementType: (row["GRN Movement Type"] || row["grn_movement_type"] || "").toString().trim(),
+            grnValue,
+          });
+        }
       }
 
       const uploadRecord = await storage.createPoUpload({
