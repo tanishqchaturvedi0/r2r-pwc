@@ -382,16 +382,42 @@ export async function registerRoutes(
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
       const csvText = req.file.buffer.toString("utf-8");
-      const result = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+      let result = Papa.parse(csvText, { header: true, skipEmptyLines: true });
 
-      if (result.errors.length > 0) {
+      if (result.errors.length > 0 && result.errors[0].type === "Abort") {
         return res.status(400).json({ message: `CSV parse errors: ${result.errors[0].message}` });
       }
 
       const config = await storage.getConfigMap();
       const processingMonth = config.processing_month || "Feb 2026";
 
-      const trimmedRows = (result.data as any[]).map((row: any) => {
+      let rows = result.data as any[];
+      const detectedHeaders = result.meta.fields || [];
+      const knownHeaders = ["Unique ID", "PO Number", "PO Line Item", "Vendor Name", "Net Amount", "GL Account", "Cost Center", "Start Date", "End Date"];
+      const headersLookValid = knownHeaders.some(h => detectedHeaders.includes(h));
+
+      if (!headersLookValid && rows.length > 0) {
+        const firstRowValues = Object.values(rows[0]).map((v: any) => (v || "").toString().trim());
+        const firstRowHasHeaders = knownHeaders.some(h => firstRowValues.includes(h));
+
+        if (firstRowHasHeaders) {
+          const headerRow = rows[0];
+          const newHeaders = Object.keys(headerRow).map(k => (headerRow[k] || "").toString().trim());
+          rows = rows.slice(1).map((row: any) => {
+            const mapped: any = {};
+            const keys = Object.keys(row);
+            keys.forEach((k, i) => {
+              if (i < newHeaders.length) {
+                mapped[newHeaders[i]] = row[k];
+              }
+            });
+            return mapped;
+          });
+          console.log("[upload] Re-mapped headers from first data row:", newHeaders);
+        }
+      }
+
+      const trimmedRows = rows.map((row: any) => {
         const trimmed: any = {};
         for (const key of Object.keys(row)) {
           trimmed[key.trim()] = row[key];
@@ -400,7 +426,7 @@ export async function registerRoutes(
       });
 
       if (trimmedRows.length > 0) {
-        console.log("[upload] CSV headers:", Object.keys(trimmedRows[0]));
+        console.log("[upload] Final headers:", Object.keys(trimmedRows[0]));
         console.log("[upload] First row sample:", JSON.stringify(trimmedRows[0]));
       }
 
