@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
+import { useProcessingMonth } from "@/contexts/ProcessingMonthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,8 +51,11 @@ interface PeriodLine {
   currentMonthTrueUp: number;
   remarks: string;
   finalProvision: number;
+  totalGrnToDate: number;
   status: string;
   category: string;
+  prevMonthLabel: string;
+  currentMonthLabel: string;
 }
 
 function formatAmount(v: number | null | undefined) {
@@ -82,6 +86,7 @@ export default function PeriodBasedPage() {
   const { can } = usePermissions();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { processingMonth, prevMonthLabel, monthLabel } = useProcessingMonth();
   const [search, setSearch] = useState("");
   const [remarksOpen, setRemarksOpen] = useState(false);
   const [remarksLine, setRemarksLine] = useState<PeriodLine | null>(null);
@@ -95,21 +100,16 @@ export default function PeriodBasedPage() {
   const [modalRemarks, setModalRemarks] = useState("");
   const [modalCategory, setModalCategory] = useState("");
 
-  const { data: config } = useQuery({
-    queryKey: ["/api/config"],
-    queryFn: () => apiGet<any>("/api/config"),
-  });
-
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/period-based"],
-    queryFn: () => apiGet<PeriodLine[]>("/api/period-based"),
+    queryKey: ["/api/period-based", processingMonth],
+    queryFn: () => apiGet<PeriodLine[]>(`/api/period-based?processingMonth=${encodeURIComponent(processingMonth)}`),
   });
 
   const updateTrueUp = useMutation({
     mutationFn: ({ id, field, value }: { id: number; field: string; value: number }) =>
       apiPut(`/api/period-based/${id}/true-up`, { field, value }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/period-based", processingMonth] });
       toast({ title: "Saved", description: "True-up updated successfully." });
     },
   });
@@ -118,7 +118,7 @@ export default function PeriodBasedPage() {
     mutationFn: ({ id, remarks }: { id: number; remarks: string }) =>
       apiPut(`/api/period-based/${id}/remarks`, { remarks }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/period-based", processingMonth] });
       setRemarksOpen(false);
       toast({ title: "Saved", description: "Remarks updated." });
     },
@@ -127,7 +127,7 @@ export default function PeriodBasedPage() {
   const submitForApproval = useMutation({
     mutationFn: () => apiPost("/api/period-based/submit", {}),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/period-based", processingMonth] });
       toast({ title: "Submitted for approval" });
     },
   });
@@ -136,7 +136,7 @@ export default function PeriodBasedPage() {
     mutationFn: ({ id, category }: { id: number; category: string }) =>
       apiPut(`/api/po-lines/${id}/category`, { category }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/period-based", processingMonth] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity-based"] });
     },
   });
@@ -202,7 +202,9 @@ export default function PeriodBasedPage() {
     l.costCenter?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const processingMonth = config?.processing_month || "Feb 2026";
+  const firstLine = lines[0];
+  const prevLabel = firstLine?.prevMonthLabel || prevMonthLabel;
+  const curLabel = firstLine?.currentMonthLabel || monthLabel;
 
   return (
     <div className="p-6 space-y-4">
@@ -289,10 +291,10 @@ export default function PeriodBasedPage() {
                           <TooltipTrigger asChild>
                             <span className="inline-flex items-center gap-1 italic cursor-help">
                               <Calculator className="h-3 w-3" />
-                              Prev Prov
+                              {prevLabel} Prov
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>Previous month calculated provision</TooltipContent>
+                          <TooltipContent>{prevLabel} calculated provision</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="text-right bg-muted/30 min-w-[80px] border-b-2 border-primary/50">
@@ -300,18 +302,18 @@ export default function PeriodBasedPage() {
                           <TooltipTrigger asChild>
                             <span className="inline-flex items-center gap-1 cursor-help">
                               <Pencil className="h-3 w-3" />
-                              Prev T/U
+                              {prevLabel} T/U
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>Previous month true-up adjustment (editable)</TooltipContent>
+                          <TooltipContent>{prevLabel} true-up adjustment (editable)</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="text-right bg-muted/30 min-w-[70px]">
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="inline-flex items-center gap-1 cursor-help">Prev GRN</span>
+                            <span className="inline-flex items-center gap-1 cursor-help">{prevLabel} GRN</span>
                           </TooltipTrigger>
-                          <TooltipContent>Goods Receipt Note value from previous month</TooltipContent>
+                          <TooltipContent>Goods Receipt Note value from {prevLabel}</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="text-right bg-muted/30 min-w-[80px]">
@@ -322,7 +324,7 @@ export default function PeriodBasedPage() {
                               Carry Fwd
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>Remaining provision carried forward from previous month</TooltipContent>
+                          <TooltipContent>Remaining provision carried forward from {prevLabel}</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="text-right bg-accent/30 min-w-[80px]">
@@ -330,18 +332,18 @@ export default function PeriodBasedPage() {
                           <TooltipTrigger asChild>
                             <span className="inline-flex items-center gap-1 italic cursor-help">
                               <Calculator className="h-3 w-3" />
-                              Cur Prov
+                              {curLabel} Prov
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>System-suggested provision for current month</TooltipContent>
+                          <TooltipContent>System-suggested provision for {curLabel}</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="text-right bg-accent/30 min-w-[70px]">
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="inline-flex items-center gap-1 cursor-help">Cur GRN</span>
+                            <span className="inline-flex items-center gap-1 cursor-help">{curLabel} GRN</span>
                           </TooltipTrigger>
-                          <TooltipContent>Goods Receipt Note value for current month</TooltipContent>
+                          <TooltipContent>Goods Receipt Note value for {curLabel}</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="text-right bg-accent/30 min-w-[80px] border-b-2 border-primary/50">
@@ -349,10 +351,10 @@ export default function PeriodBasedPage() {
                           <TooltipTrigger asChild>
                             <span className="inline-flex items-center gap-1 cursor-help">
                               <Pencil className="h-3 w-3" />
-                              Cur T/U
+                              {curLabel} T/U
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>Current month true-up adjustment (editable)</TooltipContent>
+                          <TooltipContent>{curLabel} true-up adjustment (editable)</TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead className="bg-accent/30 min-w-[60px] border-b-2 border-primary/50">
@@ -565,7 +567,7 @@ export default function PeriodBasedPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="modal-prev-trueup" className="text-xs font-medium">Previous Month True-Up</Label>
+                    <Label htmlFor="modal-prev-trueup" className="text-xs font-medium">{prevLabel} True-Up</Label>
                     <Input
                       id="modal-prev-trueup"
                       type="number"
@@ -574,12 +576,12 @@ export default function PeriodBasedPage() {
                       data-testid="input-modal-prev-trueup"
                     />
                     <p className="text-[11px] text-muted-foreground leading-tight">
-                      Manual adjustment to the previous month's provision. Use this when the calculated provision didn't match the actual expense. A positive value increases the carry-forward; negative reduces it.
+                      Manual adjustment to {prevLabel}'s provision. Use this when the calculated provision didn't match the actual expense. A positive value increases the carry-forward; negative reduces it.
                     </p>
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="modal-cur-trueup" className="text-xs font-medium">Current Month True-Up</Label>
+                    <Label htmlFor="modal-cur-trueup" className="text-xs font-medium">{curLabel} True-Up</Label>
                     <Input
                       id="modal-cur-trueup"
                       type="number"
@@ -588,7 +590,7 @@ export default function PeriodBasedPage() {
                       data-testid="input-modal-cur-trueup"
                     />
                     <p className="text-[11px] text-muted-foreground leading-tight">
-                      Manual adjustment to the current month's provision. Use when the system-suggested provision needs correction due to partial deliveries, price changes, or scope adjustments.
+                      Manual adjustment to {curLabel}'s provision. Use when the system-suggested provision needs correction due to partial deliveries, price changes, or scope adjustments.
                     </p>
                   </div>
                 </div>
@@ -635,15 +637,15 @@ export default function PeriodBasedPage() {
                   </div>
                   <div className="space-y-1 text-sm font-mono">
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">Previous Month Provision</span>
+                      <span className="text-muted-foreground">{prevLabel} Provision</span>
                       <span>{formatAmount(editModalLine.prevMonthProvision)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">+ Previous True-Up</span>
+                      <span className="text-muted-foreground">+ {prevLabel} True-Up</span>
                       <span className={parseFloat(modalPrevTrueUp) !== (editModalLine.prevMonthTrueUp || 0) ? "text-amber-600 dark:text-amber-400 font-semibold" : ""}>{formatAmount(parseFloat(modalPrevTrueUp) || 0)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">- Previous GRN</span>
+                      <span className="text-muted-foreground">- {prevLabel} GRN</span>
                       <span>{formatAmount(editModalLine.prevMonthGrn)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4 border-t pt-1">
@@ -651,15 +653,15 @@ export default function PeriodBasedPage() {
                       <span className="font-medium">{formatAmount((editModalLine.prevMonthProvision || 0) + (parseFloat(modalPrevTrueUp) || 0) - (editModalLine.prevMonthGrn || 0))}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">+ Current Provision</span>
+                      <span className="text-muted-foreground">+ {curLabel} Provision</span>
                       <span>{formatAmount(editModalLine.suggestedProvision)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">- Current GRN</span>
+                      <span className="text-muted-foreground">- {curLabel} GRN</span>
                       <span>{formatAmount(editModalLine.currentMonthGrn)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">+ Current True-Up</span>
+                      <span className="text-muted-foreground">+ {curLabel} True-Up</span>
                       <span className={parseFloat(modalCurTrueUp) !== (editModalLine.currentMonthTrueUp || 0) ? "text-amber-600 dark:text-amber-400 font-semibold" : ""}>{formatAmount(parseFloat(modalCurTrueUp) || 0)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4 border-t pt-1 text-base">

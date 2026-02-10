@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
+import { useProcessingMonth } from "@/contexts/ProcessingMonthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,7 @@ function statusBadge(status: string) {
 
 function AssignmentTab() {
   const { can } = usePermissions();
+  const { processingMonth, prevMonthLabel, monthLabel } = useProcessingMonth();
   const [search, setSearch] = useState("");
   const [assignOpen, setAssignOpen] = useState(false);
   const [selectedPo, setSelectedPo] = useState<any>(null);
@@ -56,8 +58,8 @@ function AssignmentTab() {
   const { toast } = useToast();
 
   const { data: lines, isLoading } = useQuery({
-    queryKey: ["/api/activity-based"],
-    queryFn: () => apiGet<any[]>("/api/activity-based"),
+    queryKey: ["/api/activity-based", processingMonth],
+    queryFn: () => apiGet<any[]>(`/api/activity-based?processingMonth=${encodeURIComponent(processingMonth)}`),
   });
 
   const { data: users } = useQuery({
@@ -68,7 +70,7 @@ function AssignmentTab() {
   const assignMutation = useMutation({
     mutationFn: (data: any) => apiPost("/api/activity-based/assign", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/activity-based"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity-based", processingMonth] });
       setAssignOpen(false);
       toast({ title: "Assigned", description: "PO assigned successfully." });
     },
@@ -78,7 +80,7 @@ function AssignmentTab() {
     mutationFn: ({ id, category }: { id: number; category: string }) =>
       apiPut(`/api/po-lines/${id}/category`, { category }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/activity-based"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity-based", processingMonth] });
       queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
       toast({ title: "Updated", description: "Category updated successfully." });
     },

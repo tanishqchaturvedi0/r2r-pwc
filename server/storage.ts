@@ -720,7 +720,7 @@ export const storage = {
     };
   },
 
-  async getAnalytics() {
+  async getAnalytics(processingMonth?: string) {
     const allLines = await db.select().from(poLines);
     const vendorMap = new Map<string, number>();
     for (const l of allLines) {
@@ -746,7 +746,7 @@ export const storage = {
     };
   },
 
-  async getExceptions() {
+  async getExceptions(processingMonth?: string) {
     return {
       negativeProvisions: 0, negativeValue: 0,
       zeroProvisions: 0,

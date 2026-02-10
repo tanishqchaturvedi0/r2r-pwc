@@ -406,7 +406,8 @@ Respond ONLY with valid JSON in this exact format, no markdown:
   // Reports
   app.get("/api/reports/analytics", authMiddleware, async (req, res) => {
     try {
-      const data = await storage.getAnalytics();
+      const processingMonth = req.query.processingMonth as string | undefined;
+      const data = await storage.getAnalytics(processingMonth);
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -415,7 +416,8 @@ Respond ONLY with valid JSON in this exact format, no markdown:
 
   app.get("/api/reports/exceptions", authMiddleware, async (req, res) => {
     try {
-      const data = await storage.getExceptions();
+      const processingMonth = req.query.processingMonth as string | undefined;
+      const data = await storage.getExceptions(processingMonth);
       res.json(data);
     } catch (err: any) {
       res.status(500).json({ message: err.message });

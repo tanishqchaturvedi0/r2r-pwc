@@ -1,4 +1,5 @@
 import { useAuth } from "@/contexts/AuthContext";
+import { useProcessingMonth } from "@/contexts/ProcessingMonthContext";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -82,9 +83,10 @@ function SkeletonCard() {
 }
 
 function FinanceDashboard() {
+  const { processingMonth } = useProcessingMonth();
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/dashboard"],
-    queryFn: () => apiGet<DashboardData>("/api/dashboard"),
+    queryKey: ["/api/dashboard", processingMonth],
+    queryFn: () => apiGet<DashboardData>(`/api/dashboard?processingMonth=${encodeURIComponent(processingMonth)}`),
   });
 
   if (isLoading) {

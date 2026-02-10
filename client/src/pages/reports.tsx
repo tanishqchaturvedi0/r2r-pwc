@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
+import { useProcessingMonth } from "@/contexts/ProcessingMonthContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -154,9 +155,10 @@ function ExceptionCard({ title, count, value, variant }: {
 }
 
 function AnalyticsTab() {
+  const { processingMonth } = useProcessingMonth();
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/reports/analytics"],
-    queryFn: () => apiGet<any>("/api/reports/analytics"),
+    queryKey: ["/api/reports/analytics", processingMonth],
+    queryFn: () => apiGet<any>(`/api/reports/analytics?processingMonth=${encodeURIComponent(processingMonth)}`),
   });
 
   if (isLoading) {
@@ -256,9 +258,10 @@ function AnalyticsTab() {
 }
 
 function ExceptionsTab() {
+  const { processingMonth } = useProcessingMonth();
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/reports/exceptions"],
-    queryFn: () => apiGet<any>("/api/reports/exceptions"),
+    queryKey: ["/api/reports/exceptions", processingMonth],
+    queryFn: () => apiGet<any>(`/api/reports/exceptions?processingMonth=${encodeURIComponent(processingMonth)}`),
   });
 
   if (isLoading) {
@@ -289,18 +292,19 @@ function ExceptionsTab() {
 
 function SapPostReadyTab() {
   const { can } = usePermissions();
+  const { processingMonth } = useProcessingMonth();
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [selectedCols, setSelectedCols] = useState<string[]>([...SAP_EXPORT_COLUMNS]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/reports/sap-post-ready"],
-    queryFn: () => apiGet<any>("/api/reports/sap-post-ready"),
+    queryKey: ["/api/reports/sap-post-ready", processingMonth],
+    queryFn: () => apiGet<any>(`/api/reports/sap-post-ready?processingMonth=${encodeURIComponent(processingMonth)}`),
   });
 
   const handleExport = async () => {
     const token = sessionStorage.getItem("auth_token");
     const columnsParam = selectedCols.join(",");
-    const res = await fetch(`/api/reports/sap-post-ready/export?columns=${encodeURIComponent(columnsParam)}`, {
+    const res = await fetch(`/api/reports/sap-post-ready/export?columns=${encodeURIComponent(columnsParam)}&processingMonth=${encodeURIComponent(processingMonth)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
