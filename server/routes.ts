@@ -336,26 +336,59 @@ export async function registerRoutes(
 
   app.post("/api/rules/parse", authMiddleware, async (req, res) => {
     const { text } = req.body;
-    const conditions: any[] = [];
-    const actions: any[] = [];
 
-    const ccMatch = text.match(/cost\s*center\s*(\w+)/i);
-    if (ccMatch) conditions.push({ field: "costCenter", operator: "equals", value: ccMatch[1] });
-
-    const vendorMatch = text.match(/vendor\s+(.+?)(?:\s+should|\s+go|\s+must|$)/i);
-    if (vendorMatch) conditions.push({ field: "vendorName", operator: "contains", value: vendorMatch[1].trim() });
-
-    const amountMatch = text.match(/amount\s*(above|below|greater|less|over|under)\s*(\d[\d,]*)/i);
-    if (amountMatch) {
-      const op = ["above", "greater", "over"].includes(amountMatch[1].toLowerCase()) ? "greaterThan" : "lessThan";
-      conditions.push({ field: "netAmount", operator: op, value: parseFloat(amountMatch[2].replace(/,/g, "")) });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ message: "Gemini API key not configured" });
     }
 
-    const userMatch = text.match(/(?:to|by)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/);
-    if (userMatch) actions.push({ type: "assignTo", userName: userMatch[1] });
-    else actions.push({ type: "autoAssign" });
+    try {
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    res.json({ conditions, actions, interpretedText: text });
+      const prompt = `You are an approval rule parser for a financial accruals management system. Parse the following natural language rule into structured JSON.
+
+Available fields for conditions: costCenter, vendorName, netAmount, glAccount, plant, profitCenter, itemDescription, poNumber
+Available operators: equals, notEquals, contains, greaterThan, lessThan, between, startsWith
+Available action types: assignTo (with userName), autoAssign, requireApproval (with approverName), flagForReview, setStatus (with status)
+
+Parse this rule: "${text}"
+
+Respond ONLY with valid JSON in this exact format, no markdown:
+{
+  "conditions": [{"field": "string", "operator": "string", "value": "string or number"}],
+  "actions": [{"type": "string", "userName": "optional string"}],
+  "summary": "brief human-readable summary of the rule"
+}`;
+
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text().trim();
+      const jsonStr = responseText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const parsed = JSON.parse(jsonStr);
+
+      res.json({
+        conditions: parsed.conditions || [],
+        actions: parsed.actions || [],
+        interpretedText: parsed.summary || text,
+      });
+    } catch (err: any) {
+      const conditions: any[] = [];
+      const actions: any[] = [];
+      const ccMatch = text.match(/cost\s*center\s*(\w+)/i);
+      if (ccMatch) conditions.push({ field: "costCenter", operator: "equals", value: ccMatch[1] });
+      const vendorMatch = text.match(/vendor\s+(.+?)(?:\s+should|\s+go|\s+must|$)/i);
+      if (vendorMatch) conditions.push({ field: "vendorName", operator: "contains", value: vendorMatch[1].trim() });
+      const amountMatch = text.match(/amount\s*(above|below|greater|less|over|under)\s*(\d[\d,]*)/i);
+      if (amountMatch) {
+        const op = ["above", "greater", "over"].includes(amountMatch[1].toLowerCase()) ? "greaterThan" : "lessThan";
+        conditions.push({ field: "netAmount", operator: op, value: parseFloat(amountMatch[2].replace(/,/g, "")) });
+      }
+      const userMatch = text.match(/(?:to|by)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/);
+      if (userMatch) actions.push({ type: "assignTo", userName: userMatch[1] });
+      else actions.push({ type: "autoAssign" });
+      res.json({ conditions, actions, interpretedText: text, fallback: true });
+    }
   });
 
   app.delete("/api/rules/:id", authMiddleware, requireRole("Finance Admin"), async (req, res) => {

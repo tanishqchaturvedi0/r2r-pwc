@@ -27,6 +27,16 @@ Production-ready financial accruals management system with role-based access con
 - Business User 2: sanjay@company.com / User@123
 
 ## Recent Changes
+- 2026-02-10: Enhanced features across all modules
+  - Tooltips on table headers (Period-Based, Activity-Based) explaining column meanings
+  - Visual distinction: Calculator icon for calculated columns, Pencil icon for editable columns
+  - Category switching (Period/Activity) on both Period-Based and Activity-Based pages via Select dropdown
+  - Period-Based approval workflow: Send to Approver button (Draft→Submitted→Approved→Posted)
+  - SAP Post-Ready Report tab in Reports with GL/CC breakdowns and column picker export
+  - Column picker dialog for CSV exports (select which columns to include)
+  - Approval Rules: Gemini AI-powered natural language rule parsing (with regex fallback)
+  - Backend routes: POST /api/period-based/submit, PUT /api/period-based/approve, PUT /api/po-lines/:id/category
+  - Backend routes: GET /api/reports/sap-post-ready, GET /api/reports/sap-post-ready/export
 - 2026-02-09: Initial build - complete frontend and backend implementation
   - 17-table PostgreSQL schema with Drizzle ORM
   - JWT auth with bcrypt, role-based middleware

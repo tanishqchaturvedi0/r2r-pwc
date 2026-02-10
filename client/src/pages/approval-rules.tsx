@@ -124,15 +124,31 @@ export default function ApprovalRulesPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {parsed.interpretedText && parsed.interpretedText !== ruleText && (
+                      <div className="p-3 bg-primary/5 border border-primary/20 rounded-md">
+                        <p className="text-xs text-muted-foreground mb-1">AI Summary</p>
+                        <p className="text-sm" data-testid="text-ai-summary">{parsed.interpretedText}</p>
+                      </div>
+                    )}
                     <div className="space-y-2 p-3 bg-muted/40 rounded-md">
-                      <div className="text-xs">
-                        <span className="text-muted-foreground">Conditions: </span>
-                        <span className="font-mono">{JSON.stringify(parsed.conditions)}</span>
-                      </div>
-                      <div className="text-xs">
-                        <span className="text-muted-foreground">Actions: </span>
-                        <span className="font-mono">{JSON.stringify(parsed.actions)}</span>
-                      </div>
+                      <p className="text-xs text-muted-foreground mb-2">Parsed Structure</p>
+                      {(parsed.conditions || []).map((c: any, i: number) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs">
+                          <Badge variant="outline" className="text-[10px] shrink-0">IF</Badge>
+                          <span className="font-mono">{c.field}</span>
+                          <span className="text-muted-foreground">{c.operator}</span>
+                          <span className="font-medium">{String(c.value)}</span>
+                        </div>
+                      ))}
+                      {(parsed.actions || []).map((a: any, i: number) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs">
+                          <Badge variant="secondary" className="text-[10px] shrink-0">THEN</Badge>
+                          <span className="font-mono">{a.type}</span>
+                          {a.userName && <span className="font-medium">{a.userName}</span>}
+                          {a.approverName && <span className="font-medium">{a.approverName}</span>}
+                          {a.status && <span className="font-medium">{a.status}</span>}
+                        </div>
+                      ))}
                     </div>
 
                     <div className="space-y-2">
