@@ -14,17 +14,17 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Download, Filter, Upload, Search, MessageSquare, Calculator, Pencil, Send, Info, ArrowRight } from "lucide-react";
 import { Label } from "@/components/ui/label";
-import { DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface PeriodLine {
   id: number;
@@ -58,12 +58,19 @@ interface PeriodLine {
   currentMonthLabel: string;
 }
 
+interface Approver {
+  id: number;
+  name: string;
+  email: string;
+}
+
 function formatAmount(v: number | null | undefined) {
   if (v == null) return "-";
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(v);
 }
 
 function getRowColor(line: PeriodLine) {
+  if (line.status === "Rejected") return "bg-red-50/60 dark:bg-red-950/30";
   if (line.status === "Submitted") return "bg-blue-50/50 dark:bg-blue-950/20";
   if (line.finalProvision < 0) return "bg-red-50/50 dark:bg-red-950/20";
   if (line.finalProvision === 0) return "bg-muted/30";
@@ -77,8 +84,13 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
     case "Under Review": return "secondary";
     case "Submitted": return "secondary";
     case "Posted": return "outline";
+    case "Rejected": return "destructive";
     default: return "secondary";
   }
+}
+
+function isSelectable(line: PeriodLine) {
+  return line.status === "Draft" || line.status === "Rejected";
 }
 
 export default function PeriodBasedPage() {
@@ -88,6 +100,7 @@ export default function PeriodBasedPage() {
   const queryClient = useQueryClient();
   const { processingMonth, prevMonthLabel, monthLabel } = useProcessingMonth();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
   const [remarksOpen, setRemarksOpen] = useState(false);
   const [remarksLine, setRemarksLine] = useState<PeriodLine | null>(null);
   const [remarksText, setRemarksText] = useState("");
@@ -99,10 +112,20 @@ export default function PeriodBasedPage() {
   const [modalCurTrueUp, setModalCurTrueUp] = useState("");
   const [modalRemarks, setModalRemarks] = useState("");
   const [modalCategory, setModalCategory] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [approverModalOpen, setApproverModalOpen] = useState(false);
+  const [approverModalLineIds, setApproverModalLineIds] = useState<number[]>([]);
+  const [selectedApprovers, setSelectedApprovers] = useState<Set<number>>(new Set());
+  const [approverModalLabel, setApproverModalLabel] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/period-based", processingMonth],
     queryFn: () => apiGet<PeriodLine[]>(`/api/period-based?processingMonth=${encodeURIComponent(processingMonth)}`),
+  });
+
+  const { data: approvers = [] } = useQuery({
+    queryKey: ["/api/approvers"],
+    queryFn: () => apiGet<Approver[]>("/api/approvers"),
   });
 
   const updateTrueUp = useMutation({
@@ -125,9 +148,12 @@ export default function PeriodBasedPage() {
   });
 
   const submitForApproval = useMutation({
-    mutationFn: () => apiPost("/api/period-based/submit", {}),
+    mutationFn: ({ poLineIds, approverIds }: { poLineIds: number[]; approverIds: number[] }) =>
+      apiPost("/api/period-based/submit", { poLineIds, approverIds, processingMonth }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/period-based", processingMonth] });
+      setApproverModalOpen(false);
+      setSelectedIds(new Set());
       toast({ title: "Submitted for approval" });
     },
   });
@@ -196,11 +222,59 @@ export default function PeriodBasedPage() {
     setEditingCell(null);
   };
 
-  const lines = (data || []).filter(l =>
-    !search || l.poNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    l.vendorName?.toLowerCase().includes(search.toLowerCase()) ||
-    l.costCenter?.toLowerCase().includes(search.toLowerCase())
-  );
+  const openApproverModal = (lineIds: number[], label: string) => {
+    setApproverModalLineIds(lineIds);
+    setApproverModalLabel(label);
+    setSelectedApprovers(new Set(approvers.map(a => a.id)));
+    setApproverModalOpen(true);
+  };
+
+  const toggleApprover = (id: number) => {
+    setSelectedApprovers(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        if (next.size > 1) next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSendApproval = () => {
+    submitForApproval.mutate({
+      poLineIds: approverModalLineIds,
+      approverIds: Array.from(selectedApprovers),
+    });
+  };
+
+  const toggleRowSelection = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const lines = (data || []).filter(l => {
+    if (statusFilter !== "All" && l.status !== statusFilter) return false;
+    if (!search) return true;
+    return l.poNumber?.toLowerCase().includes(search.toLowerCase()) ||
+      l.vendorName?.toLowerCase().includes(search.toLowerCase()) ||
+      l.costCenter?.toLowerCase().includes(search.toLowerCase());
+  });
+
+  const selectableLines = lines.filter(isSelectable);
+  const allSelectableSelected = selectableLines.length > 0 && selectableLines.every(l => selectedIds.has(l.id));
+
+  const toggleSelectAll = () => {
+    if (allSelectableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableLines.map(l => l.id)));
+    }
+  };
 
   const firstLine = lines[0];
   const prevLabel = firstLine?.prevMonthLabel || prevMonthLabel;
@@ -227,22 +301,37 @@ export default function PeriodBasedPage() {
               data-testid="input-search"
             />
           </div>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-36" data-testid="select-status-filter">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Statuses</SelectItem>
+              <SelectItem value="Draft">Draft</SelectItem>
+              <SelectItem value="Submitted">Submitted</SelectItem>
+              <SelectItem value="Approved">Approved</SelectItem>
+              <SelectItem value="Rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
           {can("period_based", "canDownload") && (
             <Button variant="outline" size="sm" data-testid="button-download">
               <Download className="mr-1.5 h-3.5 w-3.5" />
               Export
             </Button>
           )}
-          {can("period_based", "canEdit") && (
+          {can("period_based", "canEdit") && selectedIds.size > 0 && (
             <Button
               variant="default"
               size="sm"
-              onClick={() => submitForApproval.mutate()}
-              disabled={submitForApproval.isPending}
-              data-testid="button-submit-approver"
+              onClick={() => {
+                const ids = Array.from(selectedIds);
+                const count = ids.length;
+                openApproverModal(ids, `${count} selected line${count > 1 ? "s" : ""}`);
+              }}
+              data-testid="button-send-selected"
             >
               <Send className="mr-1.5 h-3.5 w-3.5" />
-              Send to Approver
+              Send Selected ({selectedIds.size})
             </Button>
           )}
         </div>
@@ -266,6 +355,15 @@ export default function PeriodBasedPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      {can("period_based", "canEdit") && (
+                        <TableHead className="w-10 text-center">
+                          <Checkbox
+                            checked={allSelectableSelected}
+                            onCheckedChange={toggleSelectAll}
+                            data-testid="checkbox-select-all"
+                          />
+                        </TableHead>
+                      )}
                       <TableHead className="sticky left-0 bg-card z-10 min-w-[120px]">PO Number</TableHead>
                       <TableHead className="min-w-[60px]">Line</TableHead>
                       <TableHead className="min-w-[140px]">Vendor</TableHead>
@@ -379,11 +477,25 @@ export default function PeriodBasedPage() {
                       {can("period_based", "canEdit") && (
                         <TableHead className="min-w-[50px] text-center">Edit</TableHead>
                       )}
+                      {can("period_based", "canEdit") && (
+                        <TableHead className="min-w-[50px] text-center">Send</TableHead>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {lines.map(line => (
-                      <TableRow key={line.id} className={getRowColor(line)}>
+                      <TableRow key={line.id} className={getRowColor(line)} data-testid={`row-line-${line.id}`}>
+                        {can("period_based", "canEdit") && (
+                          <TableCell className="text-center">
+                            {isSelectable(line) ? (
+                              <Checkbox
+                                checked={selectedIds.has(line.id)}
+                                onCheckedChange={() => toggleRowSelection(line.id)}
+                                data-testid={`checkbox-row-${line.id}`}
+                              />
+                            ) : null}
+                          </TableCell>
+                        )}
                         <TableCell className="sticky left-0 bg-inherit z-10 font-mono text-xs font-medium">{line.poNumber}</TableCell>
                         <TableCell className="text-xs">{line.poLineItem}</TableCell>
                         <TableCell className="text-xs truncate max-w-[140px]">{line.vendorName}</TableCell>
@@ -458,9 +570,16 @@ export default function PeriodBasedPage() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={statusVariant(line.status)} className="text-[10px]">
-                            {line.status}
-                          </Badge>
+                          <div className="flex items-center gap-1">
+                            <Badge variant={statusVariant(line.status)} className="text-[10px]" data-testid={`badge-status-${line.id}`}>
+                              {line.status}
+                            </Badge>
+                            {line.status === "Rejected" && (
+                              <Badge variant="outline" className="text-[9px] border-destructive text-destructive" data-testid={`badge-resubmit-${line.id}`}>
+                                Resubmit
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           {can("period_based", "canEdit") ? (
@@ -490,6 +609,20 @@ export default function PeriodBasedPage() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
+                          </TableCell>
+                        )}
+                        {can("period_based", "canEdit") && (
+                          <TableCell className="text-center">
+                            {isSelectable(line) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openApproverModal([line.id], `PO ${line.poNumber} / ${line.poLineItem}`)}
+                                data-testid={`button-send-row-${line.id}`}
+                              >
+                                <Send className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </TableCell>
                         )}
                       </TableRow>
@@ -678,6 +811,59 @@ export default function PeriodBasedPage() {
             <Button variant="outline" onClick={() => setEditModalOpen(false)} data-testid="button-cancel-edit-modal">Cancel</Button>
             <Button onClick={saveEditModal} data-testid="button-save-edit-modal">
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={approverModalOpen} onOpenChange={setApproverModalOpen}>
+        <DialogContent data-testid="dialog-approver-selection">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-4 w-4" />
+              Send for Approval
+            </DialogTitle>
+            <DialogDescription>
+              {approverModalLabel}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label className="text-sm font-medium">Select Approvers</Label>
+            {approvers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No approvers available.</p>
+            ) : (
+              <div className="space-y-2">
+                {approvers.map(approver => (
+                  <div
+                    key={approver.id}
+                    className="flex items-center gap-3 p-2 rounded-md border"
+                    data-testid={`approver-item-${approver.id}`}
+                  >
+                    <Checkbox
+                      checked={selectedApprovers.has(approver.id)}
+                      onCheckedChange={() => toggleApprover(approver.id)}
+                      data-testid={`checkbox-approver-${approver.id}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{approver.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{approver.email}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setApproverModalOpen(false)} data-testid="button-cancel-approver">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendApproval}
+              disabled={selectedApprovers.size === 0 || submitForApproval.isPending}
+              data-testid="button-confirm-send-approval"
+            >
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              Send
             </Button>
           </DialogFooter>
         </DialogContent>

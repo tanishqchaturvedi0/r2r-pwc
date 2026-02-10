@@ -241,7 +241,26 @@ export const rolePermissions = pgTable("role_permissions", {
   uniqueIndex("role_perm_unique_idx").on(table.role, table.permission),
 ]);
 
+export const approvalSubmissions = pgTable("approval_submissions", {
+  id: serial("id").primaryKey(),
+  poLineId: integer("po_line_id").notNull().references(() => poLines.id, { onDelete: "cascade" }),
+  submittedBy: integer("submitted_by").notNull().references(() => users.id),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  status: text("status").notNull().default("Pending"),
+  approverIds: jsonb("approver_ids").$type<number[]>().notNull(),
+  rejectionReason: text("rejection_reason"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  decidedAt: timestamp("decided_at"),
+  nudgeCount: integer("nudge_count").default(0),
+  lastNudgeAt: timestamp("last_nudge_at"),
+  processingMonth: text("processing_month"),
+}, (table) => [
+  index("approval_sub_po_line_idx").on(table.poLineId),
+  index("approval_sub_status_idx").on(table.status),
+]);
+
 // Insert schemas
+export const insertApprovalSubmissionSchema = createInsertSchema(approvalSubmissions).omit({ id: true, submittedAt: true, decidedAt: true, lastNudgeAt: true });
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, lastLogin: true, resetToken: true, resetTokenExpiry: true });
 export const insertUserRoleSchema = createInsertSchema(userRoles).omit({ id: true, assignedAt: true });
 export const insertCostCenterAssignmentSchema = createInsertSchema(costCenterAssignments).omit({ id: true, assignedAt: true });
@@ -279,6 +298,7 @@ export type SystemConfig = typeof systemConfig.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type RolePermission = typeof rolePermissions.$inferSelect;
+export type ApprovalSubmission = typeof approvalSubmissions.$inferSelect;
 
 // Login schema
 export const loginSchema = z.object({

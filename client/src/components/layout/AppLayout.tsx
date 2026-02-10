@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   LayoutDashboard, Clock, Activity, FileText, Shield, Users, BarChart3,
-  Settings, Sun, Moon, Bell, LogOut, User, ClipboardList, FileInput, ChevronDown, Calendar
+  Settings, Sun, Moon, Bell, LogOut, User, ClipboardList, FileInput, ChevronDown, Calendar, CheckSquare
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
@@ -39,6 +39,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, alwaysShow: true },
   { title: "Period-Based Accruals", url: "/period-based", icon: Clock, feature: "period_based", financeOnly: true },
+  { title: "Approval Tracker", url: "/approval-tracker", icon: CheckSquare, feature: "period_based", financeOnly: true },
   { title: "Activity-Based Accruals", url: "/activity-based", icon: Activity, feature: "activity_based", financeOnly: true },
   { title: "My Tasks", url: "/my-tasks", icon: ClipboardList, feature: "activity_based", businessUserOnly: true },
   { title: "Non-PO Accruals", url: "/non-po", icon: FileText, feature: "non_po", financeOnly: true },

@@ -19,6 +19,7 @@ import ApprovalRulesPage from "@/pages/approval-rules";
 import UsersPage from "@/pages/users";
 import ReportsPage from "@/pages/reports";
 import ConfigurationPage from "@/pages/configuration";
+import ApprovalTrackerPage from "@/pages/approval-tracker";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -65,6 +66,9 @@ function AppRoutes() {
       </Route>
       <Route path="/period-based">
         <ProtectedRoute component={PeriodBasedPage} feature="period_based" requireFinance />
+      </Route>
+      <Route path="/approval-tracker">
+        <ProtectedRoute component={ApprovalTrackerPage} feature="period_based" requireFinance />
       </Route>
       <Route path="/activity-based">
         <ProtectedRoute component={ActivityBasedPage} feature="activity_based" requireFinance />

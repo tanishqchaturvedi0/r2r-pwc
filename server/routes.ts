@@ -175,27 +175,86 @@ export async function registerRoutes(
     }
   });
 
-  // Submit period-based to approver
+  // Submit period-based for approval (single or bulk)
   app.post("/api/period-based/submit", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
     try {
-      const lines = await db.select().from(poLines).where(and(eq(poLines.category, "Period"), eq(poLines.status, "Draft")));
-      if (lines.length === 0) return res.status(400).json({ message: "No draft period lines to submit" });
-      await db.update(poLines).set({ status: "Submitted" }).where(and(eq(poLines.category, "Period"), eq(poLines.status, "Draft")));
-      await storage.logAudit(req.userId!, "Submit Period Accruals", "period_based", "batch", { count: lines.length });
-      res.json({ success: true, count: lines.length });
+      const { poLineIds, approverIds, processingMonth } = req.body;
+      if (!poLineIds || !Array.isArray(poLineIds) || poLineIds.length === 0) {
+        return res.status(400).json({ message: "poLineIds array is required" });
+      }
+      if (!approverIds || !Array.isArray(approverIds) || approverIds.length === 0) {
+        return res.status(400).json({ message: "At least one approver is required" });
+      }
+      const results = await storage.submitForApproval(poLineIds, approverIds, req.userId!, processingMonth || "Feb 2026");
+      await storage.logAudit(req.userId!, "Submit Period Accruals", "period_based", "batch", { count: results.length, approverIds });
+      res.json({ success: true, count: results.length });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });
 
-  // Approve period-based submissions
-  app.put("/api/period-based/approve", authMiddleware, requireRole("Finance Approver", "Finance Admin"), async (req, res) => {
+  // Get approvers list
+  app.get("/api/approvers", authMiddleware, async (req, res) => {
     try {
-      const lines = await db.select().from(poLines).where(and(eq(poLines.category, "Period"), eq(poLines.status, "Submitted")));
-      if (lines.length === 0) return res.status(400).json({ message: "No submitted period lines to approve" });
-      await db.update(poLines).set({ status: "Approved" }).where(and(eq(poLines.category, "Period"), eq(poLines.status, "Submitted")));
-      await storage.logAudit(req.userId!, "Approve Period Accruals", "period_based", "batch", { count: lines.length });
-      res.json({ success: true, count: lines.length });
+      const approvers = await storage.getApprovers();
+      res.json(approvers);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Approval tracker
+  app.get("/api/approvals/tracker", authMiddleware, async (req, res) => {
+    try {
+      const tracker = await storage.getApprovalTracker(req.userId!);
+      res.json(tracker);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Nudge approval
+  app.post("/api/approvals/:id/nudge", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.nudgeApproval(id);
+      await storage.logAudit(req.userId!, "Nudge Approval", "approval", String(id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Approve submission
+  app.put("/api/approvals/:id/approve", authMiddleware, requireRole("Finance Approver", "Finance Admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.approveSubmission(id, req.userId!);
+      await storage.logAudit(req.userId!, "Approve Submission", "approval", String(id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Reject submission
+  app.put("/api/approvals/:id/reject", authMiddleware, requireRole("Finance Approver", "Finance Admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { reason } = req.body;
+      await storage.rejectSubmission(id, req.userId!, reason || "");
+      await storage.logAudit(req.userId!, "Reject Submission", "approval", String(id));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Calendar stats
+  app.get("/api/dashboard/calendar-stats", authMiddleware, async (req, res) => {
+    try {
+      const stats = await storage.getCalendarStats();
+      res.json(stats);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

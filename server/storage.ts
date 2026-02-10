@@ -4,7 +4,7 @@ import {
   users, userRoles, costCenterAssignments, poUploads, poLines, grnTransactions,
   periodCalculations, activityAssignments, businessResponses, nonpoForms,
   nonpoFormAssignments, nonpoSubmissions, approvalRules, systemConfig,
-  auditLog, notifications, rolePermissions
+  auditLog, notifications, rolePermissions, approvalSubmissions
 } from "@shared/schema";
 import { hashPassword } from "./auth";
 
@@ -816,5 +816,164 @@ export const storage = {
 
   async logAudit(userId: number, action: string, entityType?: string, entityId?: string, details?: any) {
     await db.insert(auditLog).values({ userId, action, entityType, entityId, details });
+  },
+
+  async getCalendarStats() {
+    const allLines = await db.select().from(poLines).where(eq(poLines.category, "Period"));
+    const allGrns = await db.select().from(grnTransactions);
+
+    const monthStats: Record<string, { lineCount: number; totalAmount: number; poCount: number; grnTotal: number }> = {};
+
+    for (let yearOffset = -1; yearOffset <= 1; yearOffset++) {
+      const baseYear = 2026 + yearOffset;
+      for (let m = 0; m < 12; m++) {
+        const monthStart = new Date(baseYear, m, 1);
+        const monthEnd = new Date(baseYear, m + 1, 0);
+        const key = `${MONTHS[m]} ${baseYear}`;
+
+        let lineCount = 0;
+        let totalAmount = 0;
+        const poSet = new Set<string>();
+
+        for (const line of allLines) {
+          const start = parseDateStr(line.startDate);
+          const end = parseDateStr(line.endDate);
+          if (!start || !end) continue;
+          if (start <= monthEnd && end >= monthStart) {
+            lineCount++;
+            totalAmount += line.netAmount || 0;
+            if (line.poNumber) poSet.add(line.poNumber);
+          }
+        }
+
+        let grnTotal = 0;
+        for (const g of allGrns) {
+          const gDate = parseDateStr(g.grnDate);
+          if (gDate && gDate >= monthStart && gDate <= monthEnd) {
+            grnTotal += g.grnValue || 0;
+          }
+        }
+
+        if (lineCount > 0 || grnTotal > 0) {
+          monthStats[key] = { lineCount, totalAmount: Math.round(totalAmount), poCount: poSet.size, grnTotal: Math.round(grnTotal) };
+        }
+      }
+    }
+
+    return monthStats;
+  },
+
+  async getApprovers() {
+    const approverRoles = await db.select().from(userRoles)
+      .where(inArray(userRoles.role, ["Finance Approver", "Finance Admin"]));
+    const approverIds = Array.from(new Set(approverRoles.map(r => r.userId)));
+    if (approverIds.length === 0) return [];
+    const approverUsers = await db.select().from(users).where(inArray(users.id, approverIds));
+    return approverUsers.map(u => ({ id: u.id, name: u.name, email: u.email }));
+  },
+
+  async submitForApproval(poLineIds: number[], approverIds: number[], submittedBy: number, processingMonth: string) {
+    const results = [];
+    for (const poLineId of poLineIds) {
+      const existing = await db.select().from(approvalSubmissions)
+        .where(and(
+          eq(approvalSubmissions.poLineId, poLineId),
+          eq(approvalSubmissions.status, "Pending")
+        )).limit(1);
+
+      if (existing.length > 0) continue;
+
+      const [sub] = await db.insert(approvalSubmissions).values({
+        poLineId,
+        submittedBy,
+        approverIds,
+        status: "Pending",
+        processingMonth,
+        nudgeCount: 0,
+      }).returning();
+
+      await db.update(poLines).set({ status: "Submitted" }).where(eq(poLines.id, poLineId));
+      results.push(sub);
+    }
+    return results;
+  },
+
+  async getApprovalTracker(userId?: number) {
+    const subs = await db.select().from(approvalSubmissions).orderBy(desc(approvalSubmissions.submittedAt));
+    const allLines = await db.select().from(poLines);
+    const allUsers = await db.select().from(users);
+
+    return subs.map(s => {
+      const line = allLines.find(l => l.id === s.poLineId);
+      const submitter = allUsers.find(u => u.id === s.submittedBy);
+      const approver = s.approvedBy ? allUsers.find(u => u.id === s.approvedBy) : null;
+      const approverNames = (s.approverIds as number[]).map(id => {
+        const u = allUsers.find(usr => usr.id === id);
+        return u ? u.name : `User #${id}`;
+      });
+
+      return {
+        id: s.id,
+        poLineId: s.poLineId,
+        poNumber: line?.poNumber || "",
+        poLineItem: line?.poLineItem || "",
+        vendorName: line?.vendorName || "",
+        itemDescription: line?.itemDescription || "",
+        netAmount: line?.netAmount || 0,
+        costCenter: line?.costCenter || "",
+        glAccount: line?.glAccount || "",
+        submittedByName: submitter?.name || "",
+        submittedAt: s.submittedAt,
+        status: s.status,
+        approverNames,
+        approverIds: s.approverIds as number[],
+        approvedByName: approver?.name || null,
+        decidedAt: s.decidedAt,
+        rejectionReason: s.rejectionReason,
+        nudgeCount: s.nudgeCount || 0,
+        lastNudgeAt: s.lastNudgeAt,
+        processingMonth: s.processingMonth,
+        lineStatus: line?.status || "",
+      };
+    });
+  },
+
+  async nudgeApproval(submissionId: number) {
+    await db.update(approvalSubmissions).set({
+      nudgeCount: sql`${approvalSubmissions.nudgeCount} + 1`,
+      lastNudgeAt: new Date(),
+    }).where(eq(approvalSubmissions.id, submissionId));
+  },
+
+  async approveSubmission(submissionId: number, approvedBy: number) {
+    const [sub] = await db.select().from(approvalSubmissions).where(eq(approvalSubmissions.id, submissionId)).limit(1);
+    if (!sub) throw new Error("Submission not found");
+
+    await db.update(approvalSubmissions).set({
+      status: "Approved",
+      approvedBy,
+      decidedAt: new Date(),
+    }).where(eq(approvalSubmissions.id, submissionId));
+
+    await db.update(poLines).set({ status: "Approved" }).where(eq(poLines.id, sub.poLineId));
+  },
+
+  async rejectSubmission(submissionId: number, rejectedBy: number, reason: string) {
+    const [sub] = await db.select().from(approvalSubmissions).where(eq(approvalSubmissions.id, submissionId)).limit(1);
+    if (!sub) throw new Error("Submission not found");
+
+    await db.update(approvalSubmissions).set({
+      status: "Rejected",
+      approvedBy: rejectedBy,
+      decidedAt: new Date(),
+      rejectionReason: reason,
+    }).where(eq(approvalSubmissions.id, submissionId));
+
+    await db.update(poLines).set({ status: "Rejected" }).where(eq(poLines.id, sub.poLineId));
+  },
+
+  async getApprovalsByPoLineIds(poLineIds: number[]) {
+    if (poLineIds.length === 0) return [];
+    return db.select().from(approvalSubmissions).where(inArray(approvalSubmissions.poLineId, poLineIds));
   },
 };

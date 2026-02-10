@@ -6,7 +6,10 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { DollarSign, Clock, Activity, FileText, CheckCircle, AlertTriangle, TrendingUp, Users, ClipboardList } from "lucide-react";
+import { DollarSign, Clock, Activity, FileText, CheckCircle, AlertTriangle, TrendingUp, Users, ClipboardList, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { queryClient } from "@/lib/queryClient";
+import { useState, useMemo } from "react";
 
 interface DashboardData {
   totalPeriodBased: number;
@@ -82,6 +85,136 @@ function SkeletonCard() {
   );
 }
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+type CalendarStatsData = Record<string, { lineCount: number; totalAmount: number; poCount: number; grnTotal: number }>;
+
+function CalendarView() {
+  const { processingMonth, setProcessingMonth } = useProcessingMonth();
+
+  const { data: calendarData, isLoading } = useQuery({
+    queryKey: ["/api/dashboard/calendar-stats"],
+    queryFn: () => apiGet<CalendarStatsData>("/api/dashboard/calendar-stats"),
+  });
+
+  const years = useMemo(() => {
+    if (!calendarData) return [];
+    const yearSet = new Set<number>();
+    Object.keys(calendarData).forEach((key) => {
+      const parts = key.split(" ");
+      const y = parseInt(parts[1]);
+      if (!isNaN(y)) yearSet.add(y);
+    });
+    return Array.from(yearSet).sort((a, b) => a - b);
+  }, [calendarData]);
+
+  const currentParts = processingMonth.split(" ");
+  const currentYear = parseInt(currentParts[1]) || 2026;
+
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+
+  const maxLineCount = useMemo(() => {
+    if (!calendarData) return 0;
+    return Math.max(1, ...Object.values(calendarData).map((v) => v.lineCount));
+  }, [calendarData]);
+
+  const handleMonthClick = (monthStr: string) => {
+    setProcessingMonth(monthStr);
+    queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/activity-based"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/reports"] });
+  };
+
+  const getIntensityClass = (lineCount: number) => {
+    if (lineCount === 0) return "bg-muted/30";
+    const ratio = lineCount / maxLineCount;
+    if (ratio > 0.75) return "bg-primary/20";
+    if (ratio > 0.5) return "bg-primary/15";
+    if (ratio > 0.25) return "bg-primary/10";
+    return "bg-primary/5";
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-5">
+          <Skeleton className="h-[200px] w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const effectiveYears = years.length > 0 ? years : [currentYear];
+  const canGoPrev = effectiveYears.indexOf(selectedYear) > 0;
+  const canGoNext = effectiveYears.indexOf(selectedYear) < effectiveYears.length - 1;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+        <h3 className="text-sm font-semibold">Processing Month Calendar</h3>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            disabled={!canGoPrev}
+            onClick={() => setSelectedYear((y) => y - 1)}
+            data-testid="calendar-prev-year"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm font-medium min-w-[3rem] text-center" data-testid="calendar-year-label">
+            {selectedYear}
+          </span>
+          <Button
+            size="icon"
+            variant="ghost"
+            disabled={!canGoNext}
+            onClick={() => setSelectedYear((y) => y + 1)}
+            data-testid="calendar-next-year"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="pb-4">
+        <div className="grid grid-cols-4 gap-2">
+          {MONTH_NAMES.map((month) => {
+            const monthStr = `${month} ${selectedYear}`;
+            const stats = calendarData?.[monthStr];
+            const isSelected = processingMonth === monthStr;
+            const lineCount = stats?.lineCount || 0;
+
+            return (
+              <button
+                key={monthStr}
+                onClick={() => handleMonthClick(monthStr)}
+                data-testid={`calendar-month-${monthStr}`}
+                className={`
+                  p-3 rounded-md text-left transition-colors cursor-pointer
+                  ${getIntensityClass(lineCount)}
+                  ${isSelected ? "ring-2 ring-primary bg-primary/10" : "hover-elevate"}
+                `}
+              >
+                <p className="text-xs font-semibold">{month}</p>
+                {stats ? (
+                  <div className="mt-1 space-y-0.5">
+                    <p className="text-xs text-muted-foreground">{stats.lineCount} lines</p>
+                    <p className="text-xs font-medium">{formatCurrency(stats.totalAmount)}</p>
+                    <p className="text-xs text-muted-foreground">{stats.poCount} POs</p>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">No data</p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function FinanceDashboard() {
   const { processingMonth } = useProcessingMonth();
   const { data, isLoading } = useQuery({
@@ -113,6 +246,8 @@ function FinanceDashboard() {
         <StatCard title="Completion Rate" value={`${d.completionRate || 0}%`} icon={TrendingUp} description="Response completion" />
         <StatCard title="Active Users" value={d.totalUsers || 0} icon={Users} description="System users" />
       </div>
+
+      <CalendarView />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
