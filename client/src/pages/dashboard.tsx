@@ -6,10 +6,10 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { DollarSign, Clock, Activity, FileText, CheckCircle, AlertTriangle, TrendingUp, Users, ClipboardList, ChevronLeft, ChevronRight } from "lucide-react";
+import { DollarSign, Clock, Activity, FileText, CheckCircle, AlertTriangle, TrendingUp, Users, ClipboardList, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { queryClient } from "@/lib/queryClient";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
 interface DashboardData {
   totalPeriodBased: number;
@@ -91,124 +91,229 @@ type CalendarStatsData = Record<string, { lineCount: number; totalAmount: number
 
 function CalendarView() {
   const { processingMonth, setProcessingMonth } = useProcessingMonth();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isHovered, setIsHovered] = useState(false);
+  const [hasScrolledToSelected, setHasScrolledToSelected] = useState(false);
 
   const { data: calendarData, isLoading } = useQuery({
     queryKey: ["/api/dashboard/calendar-stats"],
     queryFn: () => apiGet<CalendarStatsData>("/api/dashboard/calendar-stats"),
   });
 
-  const years = useMemo(() => {
-    if (!calendarData) return [];
-    const yearSet = new Set<number>();
-    Object.keys(calendarData).forEach((key) => {
-      const parts = key.split(" ");
-      const y = parseInt(parts[1]);
-      if (!isNaN(y)) yearSet.add(y);
-    });
-    return Array.from(yearSet).sort((a, b) => a - b);
-  }, [calendarData]);
+  const allMonths = useMemo(() => {
+    const months: string[] = [];
+    for (let year = 2025; year <= 2027; year++) {
+      for (let m = 0; m < 12; m++) {
+        months.push(`${MONTH_NAMES[m]} ${year}`);
+      }
+    }
+    return months;
+  }, []);
 
-  const currentParts = processingMonth.split(" ");
-  const currentYear = parseInt(currentParts[1]) || 2026;
-
-  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const selectedIndex = useMemo(() => {
+    const idx = allMonths.indexOf(processingMonth);
+    return idx >= 0 ? idx : allMonths.indexOf("Feb 2026");
+  }, [allMonths, processingMonth]);
 
   const maxLineCount = useMemo(() => {
     if (!calendarData) return 0;
     return Math.max(1, ...Object.values(calendarData).map((v) => v.lineCount));
   }, [calendarData]);
 
+  const scrollToIndex = useCallback((idx: number, smooth = true) => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const items = container.querySelectorAll("[data-month-item]");
+    if (!items[idx]) return;
+    const item = items[idx] as HTMLElement;
+    const containerWidth = container.clientWidth;
+    const itemLeft = item.offsetLeft;
+    const itemWidth = item.offsetWidth;
+    const scrollTarget = itemLeft - containerWidth / 2 + itemWidth / 2;
+    container.scrollTo({ left: scrollTarget, behavior: smooth ? "smooth" : "instant" });
+  }, []);
+
+  useEffect(() => {
+    if (!hasScrolledToSelected && calendarData) {
+      const timer = setTimeout(() => {
+        scrollToIndex(selectedIndex, false);
+        setHasScrolledToSelected(true);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [calendarData, hasScrolledToSelected, selectedIndex, scrollToIndex]);
+
   const handleMonthClick = (monthStr: string) => {
     setProcessingMonth(monthStr);
+    const idx = allMonths.indexOf(monthStr);
+    if (idx >= 0) scrollToIndex(idx);
     queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
     queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
     queryClient.invalidateQueries({ queryKey: ["/api/activity-based"] });
     queryClient.invalidateQueries({ queryKey: ["/api/reports"] });
   };
 
-  const getIntensityClass = (lineCount: number) => {
-    if (lineCount === 0) return "bg-muted/30";
-    const ratio = lineCount / maxLineCount;
-    if (ratio > 0.75) return "bg-primary/20";
-    if (ratio > 0.5) return "bg-primary/15";
-    if (ratio > 0.25) return "bg-primary/10";
-    return "bg-primary/5";
+  const handleNav = (dir: -1 | 1) => {
+    const newIdx = Math.max(0, Math.min(allMonths.length - 1, selectedIndex + dir));
+    handleMonthClick(allMonths[newIdx]);
+  };
+
+  const getBarWidth = (lineCount: number) => {
+    if (lineCount === 0 || maxLineCount === 0) return 0;
+    return Math.max(8, (lineCount / maxLineCount) * 100);
   };
 
   if (isLoading) {
     return (
       <Card>
         <CardContent className="p-5">
-          <Skeleton className="h-[200px] w-full" />
+          <Skeleton className="h-[80px] w-full rounded-md" />
         </CardContent>
       </Card>
     );
   }
 
-  const effectiveYears = years.length > 0 ? years : [currentYear];
-  const canGoPrev = effectiveYears.indexOf(selectedYear) > 0;
-  const canGoNext = effectiveYears.indexOf(selectedYear) < effectiveYears.length - 1;
-
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
-        <h3 className="text-sm font-semibold">Processing Month Calendar</h3>
+    <Card
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      data-testid="calendar-card"
+    >
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-1 pt-3 px-4">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold">Processing Month</h3>
+        </div>
         <div className="flex items-center gap-1">
           <Button
             size="icon"
             variant="ghost"
-            disabled={!canGoPrev}
-            onClick={() => setSelectedYear((y) => y - 1)}
-            data-testid="calendar-prev-year"
+            onClick={() => handleNav(-1)}
+            disabled={selectedIndex === 0}
+            data-testid="calendar-prev-month"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-medium min-w-[3rem] text-center" data-testid="calendar-year-label">
-            {selectedYear}
+          <span className="text-sm font-medium min-w-[5rem] text-center" data-testid="calendar-selected-label">
+            {processingMonth}
           </span>
           <Button
             size="icon"
             variant="ghost"
-            disabled={!canGoNext}
-            onClick={() => setSelectedYear((y) => y + 1)}
-            data-testid="calendar-next-year"
+            onClick={() => handleNav(1)}
+            disabled={selectedIndex === allMonths.length - 1}
+            data-testid="calendar-next-month"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="pb-4">
-        <div className="grid grid-cols-4 gap-2">
-          {MONTH_NAMES.map((month) => {
-            const monthStr = `${month} ${selectedYear}`;
-            const stats = calendarData?.[monthStr];
-            const isSelected = processingMonth === monthStr;
-            const lineCount = stats?.lineCount || 0;
+      <CardContent className="px-0 pb-3">
+        <div className="relative">
+          <div
+            className="pointer-events-none absolute left-0 top-0 bottom-0 w-20 z-10"
+            style={{ background: "linear-gradient(to right, hsl(var(--card)), transparent)" }}
+          />
+          <div
+            className="pointer-events-none absolute right-0 top-0 bottom-0 w-20 z-10"
+            style={{ background: "linear-gradient(to left, hsl(var(--card)), transparent)" }}
+          />
+          <div
+            ref={scrollRef}
+            className="flex gap-2 px-6 overflow-x-auto scrollbar-hide"
+            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+            data-testid="calendar-scroll-container"
+          >
+            {allMonths.map((monthStr, idx) => {
+              const stats = calendarData?.[monthStr];
+              const isSelected = processingMonth === monthStr;
+              const distance = Math.abs(idx - selectedIndex);
+              const parts = monthStr.split(" ");
+              const monthLabel = parts[0];
+              const yearLabel = parts[1];
+              const lineCount = stats?.lineCount || 0;
+              const isJan = monthLabel === "Jan";
 
-            return (
-              <button
-                key={monthStr}
-                onClick={() => handleMonthClick(monthStr)}
-                data-testid={`calendar-month-${monthStr}`}
-                className={`
-                  p-3 rounded-md text-left transition-colors cursor-pointer
-                  ${getIntensityClass(lineCount)}
-                  ${isSelected ? "ring-2 ring-primary bg-primary/10" : "hover-elevate"}
-                `}
-              >
-                <p className="text-xs font-semibold">{month}</p>
-                {stats ? (
-                  <div className="mt-1 space-y-0.5">
-                    <p className="text-xs text-muted-foreground">{stats.lineCount} lines</p>
-                    <p className="text-xs font-medium">{formatCurrency(stats.totalAmount)}</p>
-                    <p className="text-xs text-muted-foreground">{stats.poCount} POs</p>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-xs text-muted-foreground">No data</p>
-                )}
-              </button>
-            );
-          })}
+              let opacity = 1;
+              if (!isHovered) {
+                if (distance >= 5) opacity = 0.15;
+                else if (distance >= 4) opacity = 0.25;
+                else if (distance >= 3) opacity = 0.4;
+                else if (distance >= 2) opacity = 0.65;
+                else if (distance >= 1) opacity = 0.85;
+              } else {
+                if (distance >= 8) opacity = 0.3;
+                else if (distance >= 6) opacity = 0.5;
+                else if (distance >= 4) opacity = 0.7;
+                else if (distance >= 2) opacity = 0.85;
+              }
+
+              return (
+                <button
+                  key={monthStr}
+                  data-month-item
+                  onClick={() => handleMonthClick(monthStr)}
+                  data-testid={`calendar-month-${monthStr}`}
+                  className={`
+                    shrink-0 rounded-md text-center cursor-pointer select-none
+                    transition-all duration-300 ease-out
+                    ${isSelected
+                      ? "bg-primary text-primary-foreground ring-2 ring-primary/30 ring-offset-2 ring-offset-card"
+                      : "hover-elevate"
+                    }
+                    ${isHovered ? "w-[88px] py-2.5 px-2" : "w-[72px] py-2 px-1.5"}
+                  `}
+                  style={{
+                    opacity,
+                    transform: isSelected ? "scale(1.05)" : "scale(1)",
+                  }}
+                >
+                  {isJan && (
+                    <p className={`text-[9px] font-medium mb-0.5 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                      {yearLabel}
+                    </p>
+                  )}
+                  <p className={`text-xs font-bold ${isSelected ? "" : ""}`}>
+                    {monthLabel}
+                  </p>
+                  {!isJan && (
+                    <p className={`text-[9px] ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                      {yearLabel}
+                    </p>
+                  )}
+
+                  {(isHovered || isSelected || distance <= 2) && stats ? (
+                    <div className="mt-1.5 space-y-1">
+                      <div className="mx-auto rounded-full overflow-hidden h-1" style={{ width: "80%", backgroundColor: isSelected ? "rgba(255,255,255,0.2)" : "hsl(var(--muted))" }}>
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${getBarWidth(lineCount)}%`,
+                            backgroundColor: isSelected ? "rgba(255,255,255,0.8)" : "hsl(var(--primary))",
+                          }}
+                        />
+                      </div>
+                      <p className={`text-[10px] font-semibold ${isSelected ? "text-primary-foreground" : ""}`}>
+                        {formatCurrency(stats.totalAmount)}
+                      </p>
+                      <p className={`text-[9px] ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                        {stats.lineCount} lines
+                      </p>
+                    </div>
+                  ) : stats ? (
+                    <div className="mt-1">
+                      <div className="mx-auto rounded-full overflow-hidden h-0.5" style={{ width: "60%", backgroundColor: "hsl(var(--muted))" }}>
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${getBarWidth(lineCount)}%`, backgroundColor: "hsl(var(--primary) / 0.5)" }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </CardContent>
     </Card>
