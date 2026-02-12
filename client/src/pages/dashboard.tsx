@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { DollarSign, Clock, Activity, FileText, CheckCircle, AlertTriangle, TrendingUp, Users, ClipboardList, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+import { DollarSign, Clock, Activity, FileText, CheckCircle, AlertTriangle, TrendingUp, Users, ClipboardList, ChevronLeft, ChevronRight, Calendar, EyeOff, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { queryClient } from "@/lib/queryClient";
+import { Switch } from "@/components/ui/switch";
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
 interface DashboardData {
@@ -94,6 +95,7 @@ function CalendarView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [hasScrolledToSelected, setHasScrolledToSelected] = useState(false);
+  const [hideEmpty, setHideEmpty] = useState(true);
 
   const { data: calendarData, isLoading } = useQuery({
     queryKey: ["/api/dashboard/calendar-stats"],
@@ -110,10 +112,19 @@ function CalendarView() {
     return months;
   }, []);
 
+  const displayMonths = useMemo(() => {
+    if (!hideEmpty || !calendarData) return allMonths;
+    return allMonths.filter(m => {
+      if (m === processingMonth) return true;
+      const stats = calendarData[m];
+      return stats && stats.lineCount > 0;
+    });
+  }, [allMonths, hideEmpty, calendarData, processingMonth]);
+
   const selectedIndex = useMemo(() => {
-    const idx = allMonths.indexOf(processingMonth);
-    return idx >= 0 ? idx : allMonths.indexOf("Feb 2026");
-  }, [allMonths, processingMonth]);
+    const idx = displayMonths.indexOf(processingMonth);
+    return idx >= 0 ? idx : 0;
+  }, [displayMonths, processingMonth]);
 
   const maxLineCount = useMemo(() => {
     if (!calendarData) return 0;
@@ -143,9 +154,16 @@ function CalendarView() {
     }
   }, [calendarData, hasScrolledToSelected, selectedIndex, scrollToIndex]);
 
+  useEffect(() => {
+    if (calendarData && hasScrolledToSelected) {
+      const timer = setTimeout(() => scrollToIndex(selectedIndex, true), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [hideEmpty]);
+
   const handleMonthClick = (monthStr: string) => {
     setProcessingMonth(monthStr);
-    const idx = allMonths.indexOf(monthStr);
+    const idx = displayMonths.indexOf(monthStr);
     if (idx >= 0) scrollToIndex(idx);
     queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
     queryClient.invalidateQueries({ queryKey: ["/api/period-based"] });
@@ -154,8 +172,8 @@ function CalendarView() {
   };
 
   const handleNav = (dir: -1 | 1) => {
-    const newIdx = Math.max(0, Math.min(allMonths.length - 1, selectedIndex + dir));
-    handleMonthClick(allMonths[newIdx]);
+    const newIdx = Math.max(0, Math.min(displayMonths.length - 1, selectedIndex + dir));
+    handleMonthClick(displayMonths[newIdx]);
   };
 
   const getBarWidth = (lineCount: number) => {
@@ -183,6 +201,14 @@ function CalendarView() {
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-primary" />
           <h3 className="text-sm font-semibold">Processing Month</h3>
+          <button
+            onClick={() => setHideEmpty(!hideEmpty)}
+            className="flex items-center gap-1.5 ml-2 px-2 py-0.5 rounded-md text-[10px] text-muted-foreground hover-elevate transition-colors"
+            data-testid="toggle-hide-empty-months"
+          >
+            {hideEmpty ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            <span>{hideEmpty ? "Data only" : "All months"}</span>
+          </button>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -201,7 +227,7 @@ function CalendarView() {
             size="icon"
             variant="ghost"
             onClick={() => handleNav(1)}
-            disabled={selectedIndex === allMonths.length - 1}
+            disabled={selectedIndex === displayMonths.length - 1}
             data-testid="calendar-next-month"
           >
             <ChevronRight className="h-4 w-4" />
@@ -224,7 +250,7 @@ function CalendarView() {
             style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
             data-testid="calendar-scroll-container"
           >
-            {allMonths.map((monthStr, idx) => {
+            {displayMonths.map((monthStr, idx) => {
               const stats = calendarData?.[monthStr];
               const isSelected = processingMonth === monthStr;
               const distance = Math.abs(idx - selectedIndex);
