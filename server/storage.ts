@@ -853,7 +853,7 @@ export const storage = {
         const key = `${MONTHS[m]} ${baseYear}`;
 
         let lineCount = 0;
-        let totalAmount = 0;
+        let totalProvision = 0;
         const poSet = new Set<string>();
 
         for (const line of allLines) {
@@ -862,8 +862,19 @@ export const storage = {
           if (!start || !end) continue;
           if (start <= monthEnd && end >= monthStart) {
             lineCount++;
-            totalAmount += line.netAmount || 0;
             if (line.poNumber) poSet.add(line.poNumber);
+
+            if (line.category === "Period") {
+              const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
+              const dailyRate = (line.netAmount || 0) / totalDays;
+              const overlapDays = calcOverlapDays(start, end, monthStart, monthEnd);
+              totalProvision += dailyRate * overlapDays;
+            } else {
+              const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
+              const dailyRate = (line.netAmount || 0) / totalDays;
+              const overlapDays = calcOverlapDays(start, end, monthStart, monthEnd);
+              totalProvision += dailyRate * overlapDays;
+            }
           }
         }
 
@@ -876,7 +887,7 @@ export const storage = {
         }
 
         if (lineCount > 0 || grnTotal > 0) {
-          monthStats[key] = { lineCount, totalAmount: Math.round(totalAmount), poCount: poSet.size, grnTotal: Math.round(grnTotal) };
+          monthStats[key] = { lineCount, totalAmount: Math.round(totalProvision), poCount: poSet.size, grnTotal: Math.round(grnTotal) };
         }
       }
     }
