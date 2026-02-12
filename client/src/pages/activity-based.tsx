@@ -162,8 +162,6 @@ function AssignmentTab() {
                           <TooltipContent>Cost Center code</TooltipContent>
                         </Tooltip>
                       </TableHead>
-                      <TableHead className="min-w-[70px]">Start</TableHead>
-                      <TableHead className="min-w-[70px]">End</TableHead>
                       <TableHead className="min-w-[80px]">Plant</TableHead>
                       <TableHead className="text-right min-w-[80px] bg-muted/30">
                         <Tooltip>
@@ -222,8 +220,6 @@ function AssignmentTab() {
                         <TableCell className="text-right text-xs font-mono">{formatAmount(line.netAmount)}</TableCell>
                         <TableCell className="text-xs font-mono">{line.glAccount || "-"}</TableCell>
                         <TableCell className="text-xs font-mono">{line.costCenter}</TableCell>
-                        <TableCell className="text-xs">{line.startDate || "-"}</TableCell>
-                        <TableCell className="text-xs">{line.endDate || "-"}</TableCell>
                         <TableCell className="text-xs">{line.plant || "-"}</TableCell>
                         <TableCell className="text-right text-xs font-mono bg-muted/10">{formatAmount(line.prevMonthGrn)}</TableCell>
                         <TableCell className="text-right text-xs font-mono bg-accent/10">{formatAmount(line.currentMonthGrn)}</TableCell>
