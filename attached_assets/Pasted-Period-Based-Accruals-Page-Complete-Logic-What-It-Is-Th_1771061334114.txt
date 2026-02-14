@@ -1,0 +1,273 @@
+Period-Based Accruals Page - Complete Logic
+What It Is
+The Period-Based Accruals page manages PO lines that have contract start and end dates. These lines use pro-rated daily calculations - the system divides the PO's net amount evenly across the contract duration and calculates how much of that cost falls in each month. Finance users can adjust true-ups, add remarks, change categories, and submit lines for approval.
+
+Who Can Access
+Role	Can View Page	Can Edit	Can Submit for Approval
+Finance Admin	Yes	Yes	Yes
+Finance Approver	Yes	Yes (remarks only)	No
+Business User	No	No	No
+Core Business Rule
+A PO line is Period-Based if it has both a startDate and endDate. The system automatically calculates provisions by spreading the PO value proportionally across the contract duration based on calendar days.
+
+Processing Month Filtering
+How lines are filtered for a given processing month (e.g., "Feb 2026"):
+
+A Period line is included if its date range overlaps with the processing month:
+
+startDate <= last day of processing month AND endDate >= first day of processing month
+Lines with missing dates (no start or end date) are always included
+This means a PO running Jan 2026 - Dec 2026 would appear in every month from Jan through Dec.
+
+Helper Functions (Backend)
+parseDateStr(dateStr)
+Parses date strings in two formats:
+
+MM/DD/YYYY format (splits by "/" and constructs Date)
+Any other format that JavaScript's new Date() can parse
+Returns null if the string is empty or unparseable
+parseProcessingMonth(monthStr)
+Parses a month string like "Feb 2026" into a structured object:
+
+Field	Description	Example for "Feb 2026"
+year	Year number	2026
+month	Month index (0-based)	1
+monthStart	First day of the month	Feb 1, 2026
+monthEnd	Last day of the month	Feb 28, 2026
+prevMonthStart	First day of previous month	Jan 1, 2026
+prevMonthEnd	Last day of previous month	Jan 31, 2026
+monthLabel	Display label	"Feb 2026"
+prevMonthLabel	Previous month display label	"Jan 2026"
+If parsing fails, defaults to Feb 2026.
+
+calcOverlapDays(periodStart, periodEnd, rangeStart, rangeEnd)
+Calculates how many days two date ranges overlap:
+
+effectiveStart = max(periodStart, rangeStart)
+effectiveEnd = min(periodEnd, rangeEnd)
+If effectiveEnd >= effectiveStart: overlap = (effectiveEnd - effectiveStart) / 86400000 + 1
+Otherwise: 0 days
+The Provision Calculation (Step by Step)
+For each Period-based PO line, given a processing month:
+
+Step 1: Calculate Total Contract Days
+totalDays = (endDate - startDate) in days + 1
+Minimum of 1. If dates are missing, defaults to 1.
+
+Step 2: Calculate Daily Rate
+dailyRate = netAmount / totalDays
+Step 3: Calculate Previous Month Overlap
+prevMonthDays = calcOverlapDays(startDate, endDate, prevMonthStart, prevMonthEnd)
+prevMonthProvision = round(dailyRate × prevMonthDays)
+Step 4: Calculate Current Month Overlap
+currentMonthDays = calcOverlapDays(startDate, endDate, monthStart, monthEnd)
+suggestedProvision = round(dailyRate × currentMonthDays)
+Step 5: Calculate GRN Values
+For each GRN transaction linked to this PO line:
+
+If grnDate falls within previous month → adds to prevMonthGrn
+If grnDate falls within current month → adds to currentMonthGrn
+If grnDate is on or before the last day of current month → adds to totalGrnToDate
+Step 6: Apply True-Ups
+True-ups are manual adjustments stored in the period_calculations table, keyed by poLineId + processingMonth:
+
+prevMonthTrueUp (from the period_calculations record)
+currentMonthTrueUp (from the period_calculations record)
+Step 7: Calculate Carry Forward
+carryForward = prevMonthProvision + prevMonthTrueUp - prevMonthGrn
+This represents the net amount carried over from the previous month. It captures any difference between what was provisioned, adjusted, and actually received.
+
+Step 8: Calculate Final Provision
+finalProvision = round(carryForward + suggestedProvision - currentMonthGrn + currentMonthTrueUp)
+In expanded form:
+
+finalProvision = (prevMonthProvision + prevMonthTrueUp - prevMonthGrn) + suggestedProvision - currentMonthGrn + currentMonthTrueUp
+Table Columns
+The table has a horizontal scroll area (minimum width 1800px) with column groups visually distinguished by background tinting.
+
+Master Data Columns (no tinting)
+Column	Source	Display
+Checkbox	UI state	Only shown for Finance Admin with canEdit permission. Only checkable if status is "Draft" or "Rejected".
+PO Number	poNumber	Sticky left column, monospace font
+Line	poLineItem	Small text
+Vendor	vendorName	Truncated at 140px
+Description	itemDescription	Truncated at 160px
+Net Amt	netAmount	Right-aligned, formatted with Indian number system
+GL	glAccount	Monospace
+CC	costCenter	Monospace
+Start	startDate	As-is from data
+End	endDate	As-is from data
+Previous Month Columns (bg-muted/30 tinting)
+Column	Icon	Type	Description
+Days	Calculator	Calculated	totalDays - total contract days
+[PrevMonth] Prov	Calculator	Calculated	prevMonthProvision - pro-rated provision for previous month
+[PrevMonth] T/U	Pencil	Editable	prevMonthTrueUp - manual adjustment. Click to inline-edit. Highlighted amber when non-zero. Has underline border indicating editability.
+[PrevMonth] GRN	None	Data	prevMonthGrn - GRN receipts from previous month
+Carry Fwd	Calculator	Calculated	carryForward - net carried from previous month
+Current Month Columns (bg-accent/30 tinting)
+Column	Icon	Type	Description
+[CurMonth] Prov	Calculator	Calculated	suggestedProvision - pro-rated provision for current month
+[CurMonth] GRN	None	Data	currentMonthGrn - GRN receipts from current month
+[CurMonth] T/U	Pencil	Editable	currentMonthTrueUp - manual adjustment. Click to inline-edit. Highlighted amber when non-zero.
+Remarks	Pencil	Editable	Chat bubble icon, blue when remarks exist. Opens a dialog.
+Final Column (bg-primary/10 tinting)
+Column	Icon	Type	Description
+Final	Calculator	Calculated	finalProvision - the net accrual amount. Bold, larger font. Red text if negative.
+Status & Action Columns (no tinting)
+Column	Description
+Status	Badge showing Draft/Submitted/Approved/Rejected/Posted. Rejected lines also show a "Resubmit" outline badge.
+Category	Dropdown to switch between "Period" and "Activity" (Finance Admin only). Changes move the line to the other module.
+Edit	Pencil icon button - opens the Edit Modal (Finance Admin only)
+Send	Send icon button - opens the Approver Selection Modal (only for Draft/Rejected lines, Finance Admin only)
+Column Header Tooltips
+Every calculated and editable column has a tooltip explaining what it means:
+
+Calculator icon = system-calculated, read-only
+Pencil icon = user-editable
+Editable columns have a border-b-2 border-primary/50 underline accent
+Row Highlighting
+Condition	Color
+Status is "Rejected"	Red tint (bg-red-50/60)
+Status is "Submitted"	Blue tint (bg-blue-50/50)
+Final provision is negative	Red tint (bg-red-50/50)
+Final provision is zero	Muted (bg-muted/30)
+Any true-up is non-zero	Yellow tint (bg-yellow-50/50)
+Default	No background
+Priority: Rejected > Submitted > Negative > Zero > True-up > Default
+
+Inline Cell Editing
+True-up cells (prevMonthTrueUp and currentMonthTrueUp) support inline editing:
+
+Click the value (requires canEdit permission)
+An <Input type="number"> replaces the display value, auto-focused
+Blur or Enter saves the value
+Calls PUT /api/period-based/:id/true-up with { field, value }
+Table refreshes after save
+Non-zero values are highlighted in amber
+Remarks Dialog
+Click the chat bubble icon on any row
+Opens a dialog titled "Remarks - PO [number]"
+Text area (4 rows) pre-filled with existing remarks
+Cancel or Save buttons
+Save calls PUT /api/period-based/:id/remarks with { remarks }
+Edit Modal (Full Row Editor)
+A comprehensive dialog for editing all editable fields on a single line. Opened by clicking the pencil icon on a row.
+
+Read-Only Summary Section (top)
+Shows in a dashed-border card:
+
+Net Amount, GL Account, Cost Center
+Period (startDate → endDate), Total Days
+Current status badge
+Editable Fields Section
+Field	Type	Description
+[PrevMonth] True-Up	Number input	Manual adjustment. Help text explains positive increases carry-forward, negative reduces it.
+[CurMonth] True-Up	Number input	Manual adjustment. Help text explains when corrections are needed (partial deliveries, price changes, scope changes).
+Accrual Category	Dropdown	"Period-Based" or "Activity-Based". Help text explains the difference and that changing moves the line.
+Remarks	Text area (3 rows)	Notes visible to approvers and auditors, included in exports.
+Provision Calculation Preview (bottom)
+Shows in a dashed-border card the full calculation with live updates:
+
+  [PrevMonth] Provision          [value]
++ [PrevMonth] True-Up            [value, amber if changed]
+- [PrevMonth] GRN                [value]
+────────────────────────────────────────
+= Carry Forward                  [value]
++ [CurMonth] Provision           [value]
+- [CurMonth] GRN                 [value]
++ [CurMonth] True-Up             [value, amber if changed]
+────────────────────────────────────────
+= Final Provision                [value, red if negative]
+The preview updates in real-time as the user types in the true-up fields. Changed values are highlighted in amber.
+
+Save Logic
+When "Save Changes" is clicked, the modal saves each changed field individually:
+
+If prev true-up changed → PUT /api/period-based/:id/true-up with { field: "prevMonthTrueUp", value }
+If current true-up changed → PUT /api/period-based/:id/true-up with { field: "currentMonthTrueUp", value }
+If remarks changed → PUT /api/period-based/:id/remarks with { remarks }
+If category changed → PUT /api/po-lines/:id/category with { category }
+Invalidates both period-based and activity-based caches
+Approval Submission Flow
+Selecting Lines for Submission
+Lines can be selected for approval in two ways:
+
+Method	How	Description
+Individual	Click the Send icon on a row	Opens approver modal for that single line
+Bulk	Check multiple rows → click "Send Selected (N)"	Opens approver modal for all selected lines
+Only Draft and Rejected lines can be selected (checkbox and send button are hidden for other statuses).
+
+Select All Logic
+Header checkbox selects/deselects all selectable lines (Draft + Rejected only)
+Lines with status Submitted, Approved, or Posted are never selectable
+Approver Selection Modal
+Displays all users with Finance Approver or Finance Admin roles
+Each approver shown with checkbox, name, and email
+All approvers are pre-selected by default when the modal opens
+At least one approver must remain selected (cannot deselect the last one)
+Title: "Send for Approval"
+Subtitle: Either "X selected lines" or "PO [number] / [lineItem]"
+On "Send" Click
+Calls POST /api/period-based/submit with:
+
+{
+  "poLineIds": [1, 2, 3],
+  "approverIds": [5, 6],
+  "processingMonth": "Feb 2026"
+}
+Backend creates approval submissions and changes line status to "Submitted" (see Approval Tracker logic for full details).
+
+Backend True-Up Storage
+True-ups and remarks are stored in the period_calculations table:
+
+Field	Type	Description
+id	Serial	Primary key
+poLineId	Integer (FK)	Which PO line
+processingMonth	Text	Which month this calculation is for (e.g., "Feb 2026")
+prevMonthTrueUp	Numeric	Previous month true-up adjustment
+currentMonthTrueUp	Numeric	Current month true-up adjustment
+remarks	Text	Notes for this line/month
+calculatedBy	Integer (FK)	User who last modified
+Upsert logic: When updating a true-up or remarks:
+
+Check if a period_calculations record exists for this poLineId + processingMonth
+If yes → update the existing record
+If no → insert a new record with the value, other fields defaulting to 0/null
+This means true-ups and remarks are month-specific - different processing months can have different true-up values for the same PO line.
+
+Search and Filter
+Control	Type	Logic
+Search	Text input	Filters by PO Number OR Vendor Name OR Cost Center. Case-insensitive partial match.
+Status filter	Dropdown	Options: All, Draft, Submitted, Approved, Rejected. Filters rows to show only the selected status.
+Both filters work together (AND logic).
+
+Category Switching
+Each line has a Category dropdown (Period/Activity). Changing it:
+
+Calls PUT /api/po-lines/:id/category with { category: "Activity" } (or "Period")
+Backend updates the category field on the po_lines record
+Logs an audit entry
+Invalidates both Period-Based and Activity-Based caches
+The line disappears from this page and appears on the Activity-Based page (or vice versa)
+Number Formatting
+Uses Indian number system (en-IN locale):
+
+15,00,000 instead of 1,500,000
+No decimal places (maximumFractionDigits: 0)
+Null/undefined values display as "-"
+API Endpoints
+Endpoint	Method	Who Can Use	Input	Output
+/api/period-based	GET	Finance Admin, Finance Approver	?processingMonth=Feb 2026	Array of enriched Period lines with all calculations
+/api/period-based/:id/true-up	PUT	Finance Admin	{ field: "prevMonthTrueUp"|"currentMonthTrueUp", value: number }	{ success: true }
+/api/period-based/:id/remarks	PUT	Finance Admin, Finance Approver	{ remarks: string }	{ success: true }
+/api/period-based/submit	POST	Finance Admin	{ poLineIds: number[], approverIds: number[], processingMonth: string }	Array of created submission records
+/api/po-lines/:id/category	PUT	Any logged-in user	{ category: "Period"|"Activity" }	{ success: true }
+/api/approvers	GET	Any logged-in user	None	Array of {id, name, email} for Finance Approver/Admin users
+Status Badge Styling
+Status	Badge Variant	Visual
+Draft	secondary	Grey
+Submitted	secondary	Grey
+Approved	default	Green/Primary
+Rejected	destructive	Red (+ "Resubmit" outline badge)
+Posted	outline	Bordered
+Under Review	secondary	Grey
