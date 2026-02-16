@@ -6,7 +6,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { authMiddleware, requireRole, generateToken, comparePassword } from "./auth";
-import { loginSchema, poLines } from "@shared/schema";
+import { loginSchema, poLines, poUploads, grnTransactions, periodCalculations, activityAssignments, businessResponses, nonpoForms, nonpoFormAssignments, nonpoSubmissions, approvalSubmissions, approvalRules, auditLog, notifications } from "@shared/schema";
 import { Readable } from "stream";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -796,6 +796,31 @@ Respond ONLY with valid JSON in this exact format, no markdown:
         periodBased: periodCount,
         activityBased: activityCount,
       });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/data/clear-all", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
+    try {
+      const { passkey } = req.body;
+      if (passkey !== "r2r") {
+        return res.status(403).json({ message: "Invalid passkey" });
+      }
+      await db.delete(approvalSubmissions);
+      await db.delete(businessResponses);
+      await db.delete(activityAssignments);
+      await db.delete(periodCalculations);
+      await db.delete(nonpoSubmissions);
+      await db.delete(nonpoFormAssignments);
+      await db.delete(nonpoForms);
+      await db.delete(grnTransactions);
+      await db.delete(poLines);
+      await db.delete(poUploads);
+      await db.delete(approvalRules);
+      await db.delete(notifications);
+      await db.delete(auditLog);
+      res.json({ message: "All PO and transaction data cleared successfully" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

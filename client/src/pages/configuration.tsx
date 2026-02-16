@@ -19,7 +19,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Settings, Upload, Shield, Sliders, Save, Loader2, FileUp } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from "@/components/ui/dialog";
+import { Settings, Upload, Shield, Sliders, Save, Loader2, FileUp, Trash2, AlertTriangle } from "lucide-react";
 
 function ProcessingConfig() {
   const { isFinanceAdmin } = useAuth();
@@ -372,6 +375,96 @@ function RolePermissionsConfig() {
   );
 }
 
+function ClearDataSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [passkey, setPasskey] = useState("");
+  const [clearing, setClearing] = useState(false);
+
+  const handleClear = async () => {
+    if (!passkey) return;
+    setClearing(true);
+    try {
+      const result = await apiPost<{ message: string }>("/api/data/clear-all", { passkey });
+      toast({ title: "Data Cleared", description: result.message });
+      queryClient.invalidateQueries();
+      setDialogOpen(false);
+      setPasskey("");
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to clear data", variant: "destructive" });
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <>
+      <Card className="border-destructive/30">
+        <CardHeader className="pb-3">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            Danger Zone
+          </h3>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Clear all PO data, GRN transactions, accrual calculations, approvals, non-PO submissions, and related records. This action cannot be undone. User accounts and system configuration will be preserved.
+          </p>
+          <Button
+            variant="destructive"
+            onClick={() => { setPasskey(""); setDialogOpen(true); }}
+            data-testid="button-clear-all-data"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Clear All Data
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent data-testid="dialog-clear-data">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Confirm Data Deletion
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete all PO lines, GRN transactions, accrual calculations, approval submissions, activity assignments, non-PO forms and submissions, approval rules, and notifications. User accounts and configuration settings will not be affected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="passkey-input" className="text-sm font-medium">Enter Passkey to Confirm</Label>
+            <Input
+              id="passkey-input"
+              type="password"
+              value={passkey}
+              onChange={e => setPasskey(e.target.value)}
+              placeholder="Enter passkey..."
+              onKeyDown={e => { if (e.key === "Enter" && passkey) handleClear(); }}
+              data-testid="input-clear-passkey"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDialogOpen(false)} data-testid="button-cancel-clear">
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleClear}
+              disabled={!passkey || clearing}
+              data-testid="button-confirm-clear"
+            >
+              {clearing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Clear All Data
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export default function ConfigurationPage() {
   const { isFinanceAdmin } = useAuth();
 
@@ -399,8 +492,9 @@ export default function ConfigurationPage() {
             Permissions
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="processing" className="mt-4">
+        <TabsContent value="processing" className="mt-4 space-y-4">
           <ProcessingConfig />
+          {isFinanceAdmin && <ClearDataSection />}
         </TabsContent>
         {isFinanceAdmin && (
           <TabsContent value="upload" className="mt-4">
