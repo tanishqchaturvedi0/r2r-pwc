@@ -29,7 +29,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("auth_token"));
   const [isLoading, setIsLoading] = useState(true);
 
   const hasRole = useCallback((role: string) => {
