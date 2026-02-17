@@ -15,7 +15,6 @@ import ActivityBasedPage from "@/pages/activity-based";
 import MyTasksPage from "@/pages/my-tasks";
 import NonPoPage from "@/pages/non-po";
 import MyFormsPage from "@/pages/my-forms";
-import ApprovalRulesPage from "@/pages/approval-rules";
 import UsersPage from "@/pages/users";
 import ReportsPage from "@/pages/reports";
 import ConfigurationPage from "@/pages/configuration";
@@ -81,9 +80,6 @@ function AppRoutes() {
       </Route>
       <Route path="/my-forms">
         <ProtectedRoute component={MyFormsPage} feature="non_po" requireBusiness />
-      </Route>
-      <Route path="/approval-rules">
-        <ProtectedRoute component={ApprovalRulesPage} feature="config" requireFinance />
       </Route>
       <Route path="/users">
         <ProtectedRoute component={UsersPage} feature="users" requireFinance />

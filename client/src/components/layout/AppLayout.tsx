@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useProcessingMonth } from "@/contexts/ProcessingMonthContext";
@@ -6,7 +7,7 @@ import { useLocation, Link } from "wouter";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
-  SidebarHeader, SidebarFooter
+  SidebarHeader, SidebarFooter, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,37 +19,16 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import {
-  LayoutDashboard, Clock, Activity, FileText, Shield, Users, BarChart3,
-  Settings, Sun, Moon, Bell, LogOut, User, ClipboardList, FileInput, ChevronDown, Calendar, CheckSquare
+  Collapsible, CollapsibleContent, CollapsibleTrigger
+} from "@/components/ui/collapsible";
+import {
+  LayoutDashboard, Clock, Activity, FileText, Users, BarChart3,
+  Settings, Sun, Moon, Bell, LogOut, User, ClipboardList, FileInput, ChevronDown, ChevronRight, Calendar, CheckSquare, Layers
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { apiGet } from "@/lib/api";
 import type { ReactNode } from "react";
-
-interface NavItem {
-  title: string;
-  url: string;
-  icon: any;
-  feature?: string;
-  alwaysShow?: boolean;
-  businessUserOnly?: boolean;
-  financeOnly?: boolean;
-}
-
-const navItems: NavItem[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, alwaysShow: true },
-  { title: "Period-Based Accruals", url: "/period-based", icon: Clock, feature: "period_based", financeOnly: true },
-  { title: "Approval Tracker", url: "/approval-tracker", icon: CheckSquare, feature: "period_based", financeOnly: true },
-  { title: "Activity-Based Accruals", url: "/activity-based", icon: Activity, feature: "activity_based", financeOnly: true },
-  { title: "My Tasks", url: "/my-tasks", icon: ClipboardList, feature: "activity_based", businessUserOnly: true },
-  { title: "Non-PO Accruals", url: "/non-po", icon: FileText, feature: "non_po", financeOnly: true },
-  { title: "My Forms", url: "/my-forms", icon: FileInput, feature: "non_po", businessUserOnly: true },
-  { title: "Approval Rules", url: "/approval-rules", icon: Shield, feature: "config", financeOnly: true },
-  { title: "User Management", url: "/users", icon: Users, feature: "users", financeOnly: true },
-  { title: "Reports", url: "/reports", icon: BarChart3, feature: "reports", financeOnly: true },
-  { title: "Configuration", url: "/configuration", icon: Settings, feature: "config", financeOnly: true },
-];
 
 function NotificationBell() {
   const { data: notifs } = useQuery({
@@ -77,13 +57,20 @@ function AppSidebar() {
   const { canView } = usePermissions();
   const [location] = useLocation();
 
-  const filteredNav = navItems.filter(item => {
-    if (item.alwaysShow) return true;
-    if (item.businessUserOnly && !isBusinessUser) return false;
-    if (item.financeOnly && !isFinance) return false;
-    if (item.feature && !canView(item.feature)) return false;
-    return true;
-  });
+  const accrualPaths = ["/period-based", "/activity-based", "/non-po"];
+  const isAccrualActive = accrualPaths.some(p => location.startsWith(p));
+  const [accrualsOpen, setAccrualsOpen] = useState(isAccrualActive);
+
+  const accrualSubItems = isFinance ? [
+    { title: "Period-Based", url: "/period-based", icon: Clock, feature: "period_based" },
+    { title: "Activity-Based", url: "/activity-based", icon: Activity, feature: "activity_based" },
+    { title: "Non-PO", url: "/non-po", icon: FileText, feature: "non_po" },
+  ].filter(item => canView(item.feature)) : [];
+
+  const businessTaskItems = isBusinessUser ? [
+    { title: "My Tasks", url: "/my-tasks", icon: ClipboardList, feature: "activity_based" },
+    { title: "My Forms", url: "/my-forms", icon: FileInput, feature: "non_po" },
+  ].filter(item => canView(item.feature)) : [];
 
   return (
     <Sidebar>
@@ -103,19 +90,97 @@ function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {filteredNav.map((item) => {
-                const isActive = location === item.url || (item.url !== "/dashboard" && location.startsWith(item.url));
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.url} data-testid={`nav-${item.url.slice(1)}`}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location === "/dashboard"}>
+                  <Link href="/dashboard" data-testid="nav-dashboard">
+                    <LayoutDashboard className="h-4 w-4" />
+                    <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
+              {accrualSubItems.length > 0 && (
+                <Collapsible open={accrualsOpen} onOpenChange={setAccrualsOpen}>
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton isActive={isAccrualActive} data-testid="nav-accruals">
+                        <Layers className="h-4 w-4" />
+                        <span>Accruals</span>
+                        <ChevronRight className={`ml-auto h-3.5 w-3.5 transition-transform ${accrualsOpen ? "rotate-90" : ""}`} />
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {accrualSubItems.map(item => (
+                          <SidebarMenuSubItem key={item.url}>
+                            <SidebarMenuSubButton asChild isActive={location === item.url}>
+                              <Link href={item.url} data-testid={`nav-${item.url.slice(1)}`}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </Link>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
                   </SidebarMenuItem>
-                );
-              })}
+                </Collapsible>
+              )}
+
+              {businessTaskItems.map(item => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild isActive={location === item.url}>
+                    <Link href={item.url} data-testid={`nav-${item.url.slice(1)}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+
+              {isFinance && canView("period_based") && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={location === "/approval-tracker"}>
+                    <Link href="/approval-tracker" data-testid="nav-approval-tracker">
+                      <CheckSquare className="h-4 w-4" />
+                      <span>Approval Tracker</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+
+              {isFinance && canView("reports") && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={location === "/reports"}>
+                    <Link href="/reports" data-testid="nav-reports">
+                      <BarChart3 className="h-4 w-4" />
+                      <span>Reports</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+
+              {isFinance && canView("users") && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={location === "/users"}>
+                    <Link href="/users" data-testid="nav-users">
+                      <Users className="h-4 w-4" />
+                      <span>User Management</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+
+              {isFinance && canView("config") && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={location === "/configuration"}>
+                    <Link href="/configuration" data-testid="nav-configuration">
+                      <Settings className="h-4 w-4" />
+                      <span>Configuration</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -139,7 +204,6 @@ function AppSidebar() {
 
 function ProcessingMonthSelector() {
   const { processingMonth, setProcessingMonth, availableMonths } = useProcessingMonth();
-  const { isFinance } = useAuth();
 
   const handleChange = (value: string) => {
     setProcessingMonth(value);
