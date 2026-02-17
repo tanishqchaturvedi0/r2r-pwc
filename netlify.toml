@@ -1,0 +1,6 @@
+[build]
+  command = "npm install --include=dev && npx vite build && node script/generate-redirects.cjs"
+  publish = "dist/public"
+
+[build.environment]
+  NODE_VERSION = "20"
