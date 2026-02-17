@@ -37,12 +37,17 @@ const PermissionsContext = createContext<PermissionsContextType | null>(null);
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
 
-  const { data: permissions = {}, isLoading } = useQuery<PermissionsMap>({
+  const { data: permissions = {}, isPending } = useQuery<PermissionsMap>({
     queryKey: ["/api/permissions/me"],
     queryFn: () => apiGet<PermissionsMap>("/api/permissions/me"),
     enabled: !!user,
     staleTime: 30000,
   });
+
+  // Use isPending gated on user to avoid the race condition where
+  // isLoading briefly becomes false before the fetch starts (when the
+  // query transitions from disabled to enabled on page refresh).
+  const isLoading = !!user && isPending;
 
   const can = (feature: string, action: string): boolean => {
     const featurePerms = permissions[feature];
