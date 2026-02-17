@@ -1,0 +1,43 @@
+Clarifying Questions
+To properly scope the APIs you need for the Accruals (DIC / R2R-PWC) system, I need to understand several things:
+1. Source System & Data Ingestion
+Where is the PO (Purchase Order) data coming from — SAP, another ERP, or manual upload only?
+Do you need a real-time integration API (webhook/push from SAP) or is batch file upload (Excel/CSV via the spreadsheet import) sufficient?
+What format does the PO data arrive in — SAP IDoc, BAPI, flat file, API call?
+2. R2R Process Scope
+When you say "R2R-PWC", are you implementing the PwC Record-to-Report framework specifically for the accruals & provisions sub-process? Or does this need to cover other R2R pillars (GL accounting, intercompany, close & consolidation, etc.)?
+Is the scope limited to PO-based accruals + Non-PO accruals, or do you also need GRN-based accruals, prepaid amortization, or other accrual types?
+3. Calculation & Business Logic
+For provision calculation (monthly accrual amounts), is the logic:
+Period-based: straight-line spread of PO amount over start-to-end date?
+Activity-based: business user provides % completion or actual amount?
+Both (depending on category field PERIOD vs ACTIVITY)?
+Do you need an API to auto-calculate provisions in bulk (e.g., "run month-end for Feb 2026"), or are provisions calculated one-at-a-time?
+How does true-up work — is it actual GRN - cumulative provision, or something more complex?
+4. Approval Workflow
+Are approval rules purely amount-threshold based (e.g., >1L needs CFO approval), or do they also depend on cost center, GL, plant, expense type, etc.?
+Do you need multi-level approval chains (e.g., L1 → L2 → Finance)?
+Should rejected items go back to the business user or to finance?
+5. Output & Downstream
+Do you need an API to generate journal entry postings (debit/credit entries) for the accruals?
+Does the output need to be pushed back to SAP (or another GL system) via an API, or is it exported as a file?
+Do you need a reversal API (auto-reverse previous month's accruals at month-start)?
+6. Non-PO Accruals
+Are Non-PO forms templated (predefined fields per department) or dynamic (finance creates custom forms per request)?
+Do Non-PO accruals follow the same approval workflow as PO accruals, or a separate one?
+7. Notifications & Nudging
+The schema has nudgeCount and lastNudgeAt on approvalSubmission. Do you need an API/cron that automatically sends reminders (email/in-app) to pending approvers and business users?
+What's the nudge frequency and escalation path?
+8. Reporting & Analytics
+Do you need APIs for:
+Accrual summary by cost center/GL/vendor/month?
+Aging reports (how long items have been pending)?
+Variance analysis (provision vs actual GRN)?
+Dashboard aggregations (total accrued, total approved, total pending)?
+9. Role-Based Access
+The rolePermission object exists. What are the distinct roles — Finance, Business User, Approver, Admin? Are there more granular roles?
+Does role-based access need to be enforced at the API level (server-side), or is the current Twenty permission system sufficient?
+10. Timeline & Priority
+What's the MVP scope — which APIs do you need first to get the basic month-end accrual cycle working?
+Is there an existing manual process (Excel-based?) that this is replacing? If so, can you share the current workflow steps?
+These answers will help me map out the exact API surface — which ones can leverage Twenty's built-in CRUD, which need custom server-side logic (calculations, bulk operations, workflow orchestration), and which need external integrations (SAP, email, etc.).
