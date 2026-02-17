@@ -27,6 +27,13 @@ Production-ready financial accruals management system with role-based access con
 - Business User 2: sanjay@company.com / User@123
 
 ## Recent Changes
+- 2026-02-17: Sidebar restructuring and Approval Rules relocation
+  - Sidebar reordered: Dashboard → Accruals (collapsible) → Approval Tracker → Reports → User Management → Configuration
+  - Period-Based, Activity-Based, Non-PO nested under collapsible "Accruals" group in sidebar
+  - Approval Rules moved from standalone page into Configuration as a new "Approval Rules" tab
+  - /approval-rules route removed; approval rules content integrated into /configuration page
+  - Dynamic date range for month navigation (ProcessingMonthContext, dashboard calendar, config dropdown) based on actual PO data
+  - GET /api/data/date-range endpoint scans PO/GRN data for min/max years
 - 2026-02-16: Activity-Based edit modal, merged Approval Tracker, date-based calculations
   - Activity-Based edit modal rebuilt: editable start/end dates, true-up fields, remarks, live calculation preview (mirrors Period-Based modal)
   - When Activity lines have start/end dates, full pro-rated daily calculations (overlap days, carry-forward, true-ups) are used instead of GRN-only
