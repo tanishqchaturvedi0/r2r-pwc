@@ -9,7 +9,6 @@ services:
     name: asset-manager
     runtime: node
     plan: free
-    nodeVersion: "20"
     buildCommand: npm install --include=dev && npm run build && npm run db:push
     startCommand: npm start
     envVars:
