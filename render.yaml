@@ -1,0 +1,25 @@
+databases:
+  - name: asset-manager-db
+    plan: free
+    databaseName: asset_manager
+    user: asset_manager_user
+
+services:
+  - type: web
+    name: asset-manager
+    runtime: node
+    plan: free
+    nodeVersion: "20"
+    buildCommand: npm install --include=dev && npm run build && npm run db:push
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: asset-manager-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
