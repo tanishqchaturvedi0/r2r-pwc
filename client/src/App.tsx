@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,6 +8,7 @@ import { PermissionsProvider, usePermissions } from "@/contexts/PermissionsConte
 import { ProcessingMonthProvider } from "@/contexts/ProcessingMonthContext";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
 import PeriodBasedPage from "@/pages/period-based";
@@ -25,14 +26,31 @@ import { Loader2 } from "lucide-react";
 function ProtectedRoute({ component: Component, feature, requireFinance, requireBusiness }: { component: React.ComponentType; feature?: string; requireFinance?: boolean; requireBusiness?: boolean }) {
   const { user, isFinance, isBusinessUser } = useAuth();
   const { canView, isLoading } = usePermissions();
+  const [location] = useLocation();
+
   if (!user) return <Redirect to="/" />;
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <AppLayout>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
   if (requireFinance && !isFinance) return <Redirect to="/dashboard" />;
   if (requireBusiness && !isBusinessUser) return <Redirect to="/dashboard" />;
   if (feature && !canView(feature)) return <Redirect to="/dashboard" />;
   return (
     <AppLayout>
-      <Component />
+      {/* key=location resets the boundary on every navigation so a past crash
+          on page A doesn't block page B */}
+      <PageErrorBoundary key={location}>
+        <Component />
+      </PageErrorBoundary>
     </AppLayout>
   );
 }
@@ -67,7 +85,7 @@ function AppRoutes() {
         <ProtectedRoute component={PeriodBasedPage} feature="period_based" requireFinance />
       </Route>
       <Route path="/approval-tracker">
-        <ProtectedRoute component={ApprovalTrackerPage} feature="period_based" requireFinance />
+        <ProtectedRoute component={ApprovalTrackerPage} requireFinance />
       </Route>
       <Route path="/activity-based">
         <ProtectedRoute component={ActivityBasedPage} feature="activity_based" requireFinance />

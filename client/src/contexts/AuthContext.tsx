@@ -67,12 +67,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+    // Never let the full-screen spinner show for more than 5 seconds
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     const checkAuth = async () => {
       try {
         const stored = sessionStorage.getItem("auth_token");
         if (stored) {
           const res = await fetch("/api/auth/me", {
             headers: { Authorization: `Bearer ${stored}` },
+            signal: controller.signal,
           });
           if (res.ok) {
             const data = await res.json();
@@ -83,12 +88,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch {
-        // ignore
+        // AbortError (timeout) or network error — clear invalid token
+        const stored = sessionStorage.getItem("auth_token");
+        if (stored) sessionStorage.removeItem("auth_token");
       } finally {
+        clearTimeout(timeoutId);
         setIsLoading(false);
       }
     };
     checkAuth();
+    return () => { controller.abort(); clearTimeout(timeoutId); };
   }, []);
 
   useEffect(() => {

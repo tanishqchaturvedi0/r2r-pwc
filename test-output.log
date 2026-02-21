@@ -1,0 +1,81 @@
+browserType.launch: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /var/folders/69/hr6d6xw56r7f32gsp0yvbrkc0000gn/T/cursor-sandbox-cache/58eb2139f2850b6710afbacfd972bab0/playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --disable-infobars --disable-search-engine-choice-screen --disable-sync --no-sandbox --user-data-dir=/var/folders/69/hr6d6xw56r7f32gsp0yvbrkc0000gn/T/playwright_chromiumdev_profile-ZxiBJy --remote-debugging-pipe --no-startup-window
+<launched> pid=83017
+[pid=83017][err] chrome_crashpad_handler: --database is required
+[pid=83017][err] Try 'chrome_crashpad_handler --help' for more information.
+[pid=83017][err] [0219/183512.327399:ERROR:third_party/crashpad/crashpad/util/file/file_io.cc:103] ReadExactly: expected 8, observed 0
+[pid=83017][err] [0219/183512.334211:ERROR:third_party/crashpad/crashpad/client/crash_report_database_mac.mm:109] mkdir : No such file or directory (2)
+[pid=83017][err] Received signal 6
+[pid=83017][err]  [0x00011eed0a33]
+[pid=83017][err]  [0x00011eed4ce3]
+[pid=83017][err]  [0x7ff808a7337d]
+[pid=83017][err]  [0x000000000000]
+[pid=83017][err]  [0x7ff8089793a6]
+[pid=83017][err]  [0x7ff80fd356a0]
+[pid=83017][err]  [0x7ff8088c4bee]
+[pid=83017][err]  [0x7ff8088b08ed]
+[pid=83017][err]  [0x7ff80fd09681]
+[pid=83017][err]  [0x7ff80fd09525]
+[pid=83017][err]  [0x7ff80da285c6]
+[pid=83017][err]  [0x7ff80da2932e]
+[pid=83017][err]  [0x7ff80da2835d]
+[pid=83017][err]  [0x7ff80da2b785]
+[pid=83017][err]  [0x7ff80c8a8d6b]
+[pid=83017][err]  [0x7ff80c8a6d4d]
+[pid=83017][err]  [0x7ff80c8a67f8]
+[pid=83017][err]  [0x00011958a26c]
+[pid=83017][err]  [0x000119f3d12f]
+[pid=83017][err]  [0x000119f3cf15]
+[pid=83017][err]  [0x00011affeed8]
+[pid=83017][err]  [0x000119795986]
+[pid=83017][err]  [0x00011711ee8b]
+[pid=83017][err]  [0x00010048380d]
+[pid=83017][err]  [0x000200510781]
+[pid=83017][err] [end of stack trace]
+Call log:
+  - <launching> /var/folders/69/hr6d6xw56r7f32gsp0yvbrkc0000gn/T/cursor-sandbox-cache/58eb2139f2850b6710afbacfd972bab0/playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --disable-infobars --disable-search-engine-choice-screen --disable-sync --no-sandbox --user-data-dir=/var/folders/69/hr6d6xw56r7f32gsp0yvbrkc0000gn/T/playwright_chromiumdev_profile-ZxiBJy --remote-debugging-pipe --no-startup-window
+  - <launched> pid=83017
+  - [pid=83017][err] chrome_crashpad_handler: --database is required
+  - [pid=83017][err] Try 'chrome_crashpad_handler --help' for more information.
+  - [pid=83017][err] [0219/183512.327399:ERROR:third_party/crashpad/crashpad/util/file/file_io.cc:103] ReadExactly: expected 8, observed 0
+  - [pid=83017][err] [0219/183512.334211:ERROR:third_party/crashpad/crashpad/client/crash_report_database_mac.mm:109] mkdir : No such file or directory (2)
+  - [pid=83017][err] Received signal 6
+  - [pid=83017][err]  [0x00011eed0a33]
+  - [pid=83017][err]  [0x00011eed4ce3]
+  - [pid=83017][err]  [0x7ff808a7337d]
+  - [pid=83017][err]  [0x000000000000]
+  - [pid=83017][err]  [0x7ff8089793a6]
+  - [pid=83017][err]  [0x7ff80fd356a0]
+  - [pid=83017][err]  [0x7ff8088c4bee]
+  - [pid=83017][err]  [0x7ff8088b08ed]
+  - [pid=83017][err]  [0x7ff80fd09681]
+  - [pid=83017][err]  [0x7ff80fd09525]
+  - [pid=83017][err]  [0x7ff80da285c6]
+  - [pid=83017][err]  [0x7ff80da2932e]
+  - [pid=83017][err]  [0x7ff80da2835d]
+  - [pid=83017][err]  [0x7ff80da2b785]
+  - [pid=83017][err]  [0x7ff80c8a8d6b]
+  - [pid=83017][err]  [0x7ff80c8a6d4d]
+  - [pid=83017][err]  [0x7ff80c8a67f8]
+  - [pid=83017][err]  [0x00011958a26c]
+  - [pid=83017][err]  [0x000119f3d12f]
+  - [pid=83017][err]  [0x000119f3cf15]
+  - [pid=83017][err]  [0x00011affeed8]
+  - [pid=83017][err]  [0x000119795986]
+  - [pid=83017][err]  [0x00011711ee8b]
+  - [pid=83017][err]  [0x00010048380d]
+  - [pid=83017][err]  [0x000200510781]
+  - [pid=83017][err] [end of stack trace]
+  - [pid=83017] <gracefully close start>
+  - [pid=83017] <kill>
+  - [pid=83017] <will force kill>
+  - [pid=83017] exception while trying to kill process: Error: kill EPERM
+  - [pid=83017] <process did exit: exitCode=null, signal=SIGABRT>
+  - [pid=83017] starting temporary directories cleanup
+  - [pid=83017] finished temporary directories cleanup
+  - [pid=83017] <gracefully close end>
+
+    at testR2RPwcApplication (/Users/vasukaushik/Developer/r2r-pwc/test-navigation.js:10:34)
+    at /Users/vasukaushik/Developer/r2r-pwc/test-navigation.js:261:1

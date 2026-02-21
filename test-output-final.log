@@ -1,0 +1,16 @@
+Error: Failed to launch the browser process:  Code: null
+
+stderr:
+[0219/183905.210683:ERROR:third_party/crashpad/crashpad/util/mac/xattr.cc:41] getxattr size org.chromium.crashpad.database.initialized on file /Users/vasukaushik/Library/Application Support/Google/Chrome/Crashpad: Operation not permitted (1)
+[0219/183905.211604:ERROR:third_party/crashpad/crashpad/util/mac/xattr.cc:41] getxattr size com.googlecode.crashpad.initialized on file /Users/vasukaushik/Library/Application Support/Google/Chrome/Crashpad: Operation not permitted (1)
+[0219/183905.211794:ERROR:third_party/crashpad/crashpad/util/mac/xattr.cc:66] setxattr org.chromium.crashpad.database.initialized on file /Users/vasukaushik/Library/Application Support/Google/Chrome/Crashpad: Operation not permitted (1)
+[0219/183905.224080:ERROR:third_party/crashpad/crashpad/util/file/file_io.cc:103] ReadExactly: expected 8, observed 0
+[0219/183905.225028:ERROR:third_party/crashpad/crashpad/util/mac/xattr.cc:41] getxattr size org.chromium.crashpad.database.initialized on file /Users/vasukaushik/Library/Application Support/Google/Chrome/Crashpad: Operation not permitted (1)
+[0219/183905.225193:ERROR:third_party/crashpad/crashpad/util/mac/xattr.cc:41] getxattr size com.googlecode.crashpad.initialized on file /Users/vasukaushik/Library/Application Support/Google/Chrome/Crashpad: Operation not permitted (1)
+[0219/183905.225355:ERROR:third_party/crashpad/crashpad/util/mac/xattr.cc:66] setxattr org.chromium.crashpad.database.initialized on file /Users/vasukaushik/Library/Application Support/Google/Chrome/Crashpad: Operation not permitted (1)
+
+TROUBLESHOOTING: https://pptr.dev/troubleshooting
+
+    at ChildProcess.onClose (file:///Users/vasukaushik/Developer/r2r-pwc/node_modules/@puppeteer/browsers/lib/esm/launch.js:339:24)
+    at ChildProcess.emit (node:events:531:35)
+    at ChildProcess._handle.onexit (node:internal/child_process:293:12)
