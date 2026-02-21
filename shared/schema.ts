@@ -86,6 +86,18 @@ export const poLines = pgTable("po_lines", {
   index("po_lines_upload_idx").on(table.uploadId),
 ]);
 
+export const grnUploads = pgTable("grn_uploads", {
+  id: serial("id").primaryKey(),
+  uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
+  filename: text("filename").notNull(),
+  processingMonth: text("processing_month").notNull(),
+  uploadDate: timestamp("upload_date").defaultNow().notNull(),
+  totalRows: integer("total_rows").default(0),
+  matchedRows: integer("matched_rows").default(0),
+  unmatchedRows: integer("unmatched_rows").default(0),
+  status: text("status").notNull().default("Completed"),
+});
+
 export const grnTransactions = pgTable("grn_transactions", {
   id: serial("id").primaryKey(),
   poLineId: integer("po_line_id").notNull().references(() => poLines.id, { onDelete: "cascade" }),
@@ -96,6 +108,7 @@ export const grnTransactions = pgTable("grn_transactions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("grn_po_line_idx").on(table.poLineId),
+  index("grn_doc_idx").on(table.grnDoc),
 ]);
 
 export const periodCalculations = pgTable("period_calculations", {
@@ -107,6 +120,7 @@ export const periodCalculations = pgTable("period_calculations", {
   remarks: text("remarks"),
   calculatedAt: timestamp("calculated_at").defaultNow().notNull(),
   calculatedBy: integer("calculated_by").references(() => users.id),
+  activityFinalProvision: real("activity_final_provision"),
 }, (table) => [
   uniqueIndex("period_calc_unique_idx").on(table.poLineId, table.processingMonth),
   index("period_calc_po_line_idx").on(table.poLineId),
@@ -120,6 +134,10 @@ export const activityAssignments = pgTable("activity_assignments", {
   assignedDate: timestamp("assigned_date").defaultNow().notNull(),
   assignedBy: integer("assigned_by").references(() => users.id),
   status: text("status").notNull().default("Assigned"),
+  nudgeCount: integer("nudge_count").default(0),
+  lastNudgeAt: timestamp("last_nudge_at"),
+  returnComments: text("return_comments"),
+  returnedAt: timestamp("returned_at"),
 }, (table) => [
   index("activity_assign_user_idx").on(table.assignedToUserId),
   index("activity_assign_po_idx").on(table.poLineId),
@@ -157,6 +175,11 @@ export const nonpoFormAssignments = pgTable("nonpo_form_assignments", {
   formId: integer("form_id").notNull().references(() => nonpoForms.id, { onDelete: "cascade" }),
   assignedToUserId: integer("assigned_to_user_id").notNull().references(() => users.id),
   assignedDate: timestamp("assigned_date").defaultNow().notNull(),
+  nudgeCount: integer("nudge_count").default(0),
+  lastNudgeAt: timestamp("last_nudge_at"),
+  status: text("status").notNull().default("Assigned"),
+  returnComments: text("return_comments"),
+  returnedAt: timestamp("returned_at"),
 }, (table) => [
   index("nonpo_assign_form_idx").on(table.formId),
   index("nonpo_assign_user_idx").on(table.assignedToUserId),

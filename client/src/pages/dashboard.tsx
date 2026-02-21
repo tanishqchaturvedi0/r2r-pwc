@@ -96,10 +96,18 @@ function CalendarView() {
   const [isHovered, setIsHovered] = useState(false);
   const [hasScrolledToSelected, setHasScrolledToSelected] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(true);
+  // Defer this heavy query by 600ms so critical startup queries (permissions, config)
+  // complete first and don't get blocked by the CPU-intensive server computation.
+  const [calendarEnabled, setCalendarEnabled] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setCalendarEnabled(true), 600);
+    return () => clearTimeout(t);
+  }, []);
 
   const { data: calendarData, isLoading } = useQuery({
     queryKey: ["/api/dashboard/calendar-stats"],
     queryFn: () => apiGet<CalendarStatsData>("/api/dashboard/calendar-stats"),
+    enabled: calendarEnabled,
   });
 
   const { data: dateRange } = useQuery({
@@ -109,8 +117,11 @@ function CalendarView() {
 
   const allMonths = useMemo(() => {
     const currentYear = new Date().getFullYear();
-    const minYear = Math.min(dateRange?.minYear ?? currentYear, currentYear) - 1;
-    const maxYear = Math.max(dateRange?.maxYear ?? currentYear, currentYear) + 1;
+    // Cap range — bad DB sentinel dates (e.g. 12/31/9999) must never produce thousands of months
+    const rawMin = dateRange?.minYear ?? currentYear;
+    const rawMax = dateRange?.maxYear ?? currentYear;
+    const minYear = Math.max(rawMin, currentYear - 10) - 1;
+    const maxYear = Math.min(rawMax, currentYear + 3) + 1;
     const months: string[] = [];
     for (let year = minYear; year <= maxYear; year++) {
       for (let m = 0; m < 12; m++) {

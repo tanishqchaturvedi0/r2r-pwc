@@ -5,8 +5,8 @@ export function getAuthHeaders(): HeadersInit {
 
 export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401 && url.includes("/api/auth/")) {
+  const res = await fetch(url, { cache: "no-store", ...options, headers });
+  if (res.status === 401) {
     sessionStorage.removeItem("auth_token");
     window.location.href = "/";
   }
@@ -43,6 +43,18 @@ export async function apiPost<T>(url: string, data?: unknown): Promise<T> {
 export async function apiPut<T>(url: string, data?: unknown): Promise<T> {
   const res = await authFetch(url, {
     method: "PUT",
+    body: data ? JSON.stringify(data) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || "Request failed");
+  }
+  return res.json();
+}
+
+export async function apiPatch<T>(url: string, data?: unknown): Promise<T> {
+  const res = await authFetch(url, {
+    method: "PATCH",
     body: data ? JSON.stringify(data) : undefined,
   });
   if (!res.ok) {

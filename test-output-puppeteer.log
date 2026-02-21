@@ -1,0 +1,3 @@
+TimeoutError: Timed out after 30000 ms while waiting for the WS endpoint URL to appear in stdout!
+    at ChromeLauncher.launch (file:///Users/vasukaushik/Developer/r2r-pwc/node_modules/puppeteer-core/lib/esm/puppeteer/node/BrowserLauncher.js:145:23)
+    at async testR2RPwcApplication (file:///Users/vasukaushik/Developer/r2r-pwc/test-navigation-puppeteer.js:10:19)

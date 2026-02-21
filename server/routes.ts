@@ -4,9 +4,9 @@ import multer from "multer";
 import Papa from "papaparse";
 import { storage } from "./storage";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireRole, generateToken, comparePassword } from "./auth";
-import { loginSchema, poLines, poUploads, grnTransactions, periodCalculations, activityAssignments, businessResponses, nonpoForms, nonpoFormAssignments, nonpoSubmissions, approvalSubmissions, approvalRules, auditLog, notifications } from "@shared/schema";
+import { loginSchema, poLines, poUploads, grnTransactions, grnUploads, periodCalculations, activityAssignments, businessResponses, nonpoForms, nonpoFormAssignments, nonpoSubmissions, approvalSubmissions, approvalRules, auditLog, notifications } from "@shared/schema";
 import { Readable } from "stream";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -30,9 +30,10 @@ export async function registerRoutes(
       const userWithRoles = await storage.getUserWithRoles(user.id);
       if (!userWithRoles) return res.status(500).json({ message: "User roles not found" });
 
-      await storage.updateLastLogin(user.id);
       const token = generateToken({ userId: user.id, email: user.email, roles: userWithRoles.roles });
-      await storage.logAudit(user.id, "Login", "user", String(user.id));
+      // Fire-and-forget: don't block the login response for non-critical writes
+      storage.updateLastLogin(user.id).catch(() => {});
+      storage.logAudit(user.id, "Login", "user", String(user.id)).catch(() => {});
 
       res.json({ token, user: userWithRoles });
     } catch (err: any) {
@@ -147,8 +148,24 @@ export async function registerRoutes(
   // Period-Based
   app.get("/api/period-based", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
     try {
-      const processingMonth = req.query.processingMonth as string | undefined;
-      const lines = await storage.getPeriodBasedLines(processingMonth);
+      const processingMonth = (req.query.processingMonth as string) || "";
+      const pageParam = req.query.page;
+      const limitParam = req.query.limit;
+
+      // Use paginated method when page/limit params are provided
+      if (pageParam !== undefined && limitParam !== undefined) {
+        const result = await storage.getPeriodBasedLinesPaged({
+          processingMonth: processingMonth || "Feb 2026",
+          page: Math.max(0, parseInt(pageParam as string) || 0),
+          limit: Math.min(500, Math.max(1, parseInt(limitParam as string) || 100)),
+          search: (req.query.search as string) || "",
+          statusFilter: (req.query.status as string) || "All",
+        });
+        return res.json(result);
+      }
+
+      // Legacy: return full array for reports/exports
+      const lines = await storage.getPeriodBasedLines(processingMonth || undefined);
       res.json(lines);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -158,7 +175,18 @@ export async function registerRoutes(
   app.put("/api/period-based/:id/true-up", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      await storage.updatePeriodTrueUp(id, req.body.field, req.body.value, req.userId!);
+      const { field, value, processingMonth } = req.body;
+      if (field === "prevMonthTrueUp") {
+        return res.status(400).json({ message: "Previous month true-up cannot be modified in the current processing month" });
+      }
+      if (!["currentMonthTrueUp"].includes(field)) {
+        return res.status(400).json({ message: "Invalid field" });
+      }
+      const numericValue = parseFloat(value) || 0;
+      if (numericValue < 0) {
+        return res.status(400).json({ message: "True-up cannot be negative" });
+      }
+      await storage.updatePeriodTrueUp(id, field, numericValue, req.userId!, processingMonth);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -168,7 +196,8 @@ export async function registerRoutes(
   app.put("/api/period-based/:id/remarks", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      await storage.updatePeriodRemarks(id, req.body.remarks, req.userId!);
+      const { remarks, processingMonth } = req.body;
+      await storage.updatePeriodRemarks(id, remarks, req.userId!, processingMonth);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -185,7 +214,12 @@ export async function registerRoutes(
       if (!approverIds || !Array.isArray(approverIds) || approverIds.length === 0) {
         return res.status(400).json({ message: "At least one approver is required" });
       }
-      const results = await storage.submitForApproval(poLineIds, approverIds, req.userId!, processingMonth || "Feb 2026");
+      let month = processingMonth;
+      if (!month) {
+        const config = await storage.getConfigMap();
+        month = config.processing_month || "Feb 2026";
+      }
+      const results = await storage.submitForApproval(poLineIds, approverIds, req.userId!, month);
       await storage.logAudit(req.userId!, "Submit Period Accruals", "period_based", "batch", { count: results.length, approverIds });
       res.json({ success: true, count: results.length });
     } catch (err: any) {
@@ -220,6 +254,28 @@ export async function registerRoutes(
       await storage.nudgeApproval(id);
       await storage.logAudit(req.userId!, "Nudge Approval", "approval", String(id));
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/approvals/:id/recall", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await storage.recallSubmission(id);
+      await storage.logAudit(req.userId!, "Recall Submission", "approval", String(id));
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/activity-based/:id/recall", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await storage.recallActivityAssignment(id);
+      await storage.logAudit(req.userId!, "Recall Activity Assignment", "activity", String(id));
+      res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -299,8 +355,22 @@ export async function registerRoutes(
   // Activity-Based
   app.get("/api/activity-based", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
     try {
-      const processingMonth = req.query.processingMonth as string | undefined;
-      const lines = await storage.getActivityBasedLines(processingMonth);
+      const processingMonth = (req.query.processingMonth as string) || "";
+      const pageParam = req.query.page;
+      const limitParam = req.query.limit;
+
+      if (pageParam !== undefined && limitParam !== undefined) {
+        const result = await storage.getActivityBasedLinesPaged({
+          processingMonth: processingMonth || "Feb 2026",
+          page: Math.max(0, parseInt(pageParam as string) || 0),
+          limit: Math.min(500, Math.max(1, parseInt(limitParam as string) || 100)),
+          search: (req.query.search as string) || "",
+          hideAssigned: req.query.hideAssigned === "true",
+        });
+        return res.json(result);
+      }
+
+      const lines = await storage.getActivityBasedLines(processingMonth || undefined);
       res.json(lines);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -309,9 +379,15 @@ export async function registerRoutes(
 
   app.post("/api/activity-based/assign", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
     try {
-      const { poLineId, assignedToUserId } = req.body;
-      const id = await storage.assignActivityPo(poLineId, assignedToUserId, req.userId!);
-      res.json({ id });
+      const { poLineId, assignedToUserId, assignedToUserIds } = req.body;
+      // Support both single (legacy) and multi-user assignment
+      if (assignedToUserIds && Array.isArray(assignedToUserIds) && assignedToUserIds.length > 0) {
+        const result = await storage.assignActivityPoMultiple(poLineId, assignedToUserIds, req.userId!);
+        res.json({ ids: result.map(a => a.id) });
+      } else {
+        const id = await storage.assignActivityPo(poLineId, assignedToUserId, req.userId!);
+        res.json({ id });
+      }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -344,6 +420,64 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/activity-based/:id/nudge", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.nudgeActivityAssignment(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/activity-based/:id/return", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { comments } = req.body;
+      if (!comments?.trim()) return res.status(400).json({ message: "Return comments are required." });
+      const result = await storage.returnActivityTask(id, comments.trim());
+      await storage.logAudit(req.userId!, "Return Task to Finance", "activity", String(id));
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Reset business response + recall assignments so Finance Admin can re-assign after editing
+  app.post("/api/activity-based/:id/reset-response", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await storage.resetActivityResponse(id);
+      await storage.logAudit(req.userId!, "Reset Activity Response", "activity", String(id));
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/activity-based/:id/submit-for-approval", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { approverIds = [], processingMonth } = req.body;
+      const config = await storage.getConfigMap();
+      const month = processingMonth || config.processing_month || "Feb 2026";
+      const result = await storage.submitActivityForApproval(id, approverIds, req.userId!, month);
+      await storage.logAudit(req.userId!, "Submit Activity for Approval", "activity", String(id));
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/activity-based/approval-tracker", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
+    try {
+      const data = await storage.getActivityApprovalTracker();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.put("/api/activity-based/:id/approve", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -357,11 +491,18 @@ export async function registerRoutes(
   app.put("/api/activity-based/:id/true-up", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
     try {
       const poLineId = parseInt(req.params.id);
-      const { field, value } = req.body;
-      if (!["prevMonthTrueUp", "currentMonthTrueUp"].includes(field)) {
+      const { field, value, processingMonth } = req.body;
+      if (field === "prevMonthTrueUp") {
+        return res.status(400).json({ message: "Previous month true-up cannot be modified in the current processing month" });
+      }
+      if (!["currentMonthTrueUp"].includes(field)) {
         return res.status(400).json({ message: "Invalid field" });
       }
-      await storage.updatePeriodTrueUp(poLineId, field, parseFloat(value) || 0, req.userId!);
+      const numericValue = parseFloat(value) || 0;
+      if (numericValue < 0) {
+        return res.status(400).json({ message: "True-up cannot be negative" });
+      }
+      await storage.updatePeriodTrueUp(poLineId, field, numericValue, req.userId!, processingMonth);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -371,8 +512,8 @@ export async function registerRoutes(
   app.put("/api/activity-based/:id/remarks", authMiddleware, async (req, res) => {
     try {
       const poLineId = parseInt(req.params.id);
-      const { remarks } = req.body;
-      await storage.updateRemarks(poLineId, remarks || "", req.userId!);
+      const { remarks, processingMonth } = req.body;
+      await storage.updatePeriodRemarks(poLineId, remarks || "", req.userId!, processingMonth);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -400,6 +541,10 @@ export async function registerRoutes(
 
   app.post("/api/non-po/submit", authMiddleware, async (req, res) => {
     try {
+      const provisionAmount = parseFloat(req.body?.standardFields?.provisionAmount);
+      if (!isNaN(provisionAmount) && provisionAmount < 0) {
+        return res.status(400).json({ message: "Provision amount cannot be negative" });
+      }
       const sub = await storage.submitNonPoForm(req.body, req.userId!);
       res.json(sub);
     } catch (err: any) {
@@ -411,6 +556,50 @@ export async function registerRoutes(
     try {
       const subs = await storage.getNonPoSubmissions();
       res.json(subs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/non-po/assignments/:id/submit-for-approval", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { approverIds = [] } = req.body;
+      const result = await storage.submitNonPoForApproval(id, approverIds);
+      await storage.logAudit(req.userId!, "Submit Non-PO for Approval", "non_po", String(id));
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/non-po/approval-tracker", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
+    try {
+      const data = await storage.getNonPoApprovalTracker();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/non-po/assignments/:id/nudge", authMiddleware, requireRole("Finance Admin", "Finance Approver"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.nudgeNonPoAssignment(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/non-po/assignments/:id/return", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { comments } = req.body;
+      if (!comments?.trim()) return res.status(400).json({ message: "Return comments are required." });
+      const result = await storage.returnNonPoForm(id, comments.trim());
+      await storage.logAudit(req.userId!, "Return Form to Finance", "non_po", String(id));
+      res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -444,56 +633,145 @@ export async function registerRoutes(
   app.post("/api/rules/parse", authMiddleware, async (req, res) => {
     const { text } = req.body;
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ message: "Gemini API key not configured" });
+      return res.status(500).json({ message: "OpenAI API key not configured" });
     }
 
     try {
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey });
 
-      const prompt = `You are an approval rule parser for a financial accruals management system. Parse the following natural language rule into structured JSON.
+      const systemPrompt = `You are an approval rule parser for a financial accruals management system. Your job is to extract structured conditions and actions from natural language approval rules.
 
-Available fields for conditions: costCenter, vendorName, netAmount, glAccount, plant, profitCenter, itemDescription, poNumber
-Available operators: equals, notEquals, contains, greaterThan, lessThan, between, startsWith
-Available action types: assignTo (with userName), autoAssign, requireApproval (with approverName), flagForReview, setStatus (with status)
+===== AVAILABLE FIELDS =====
 
-Parse this rule: "${text}"
+PO Line fields:
+- costCenter: Cost Center code
+- vendorName: Vendor / Supplier name
+- netAmount: Net PO amount (numeric)
+- glAccount: GL Account code
+- plant: Plant code
+- profitCenter: Profit Center code
+- itemDescription: Item description text
+- poNumber: Purchase Order number
 
-Respond ONLY with valid JSON in this exact format, no markdown:
+Calculated / accrual fields:
+- currentMonthTrueUp: Current month true-up adjustment amount (numeric)
+- prevMonthTrueUp: Previous month true-up amount (numeric)
+- finalProvision: Final provision amount for current month (numeric)
+- suggestedProvision: System-suggested provision before true-up (numeric)
+
+===== AVAILABLE OPERATORS =====
+equals, notEquals, contains, greaterThan, lessThan, between, startsWith
+
+===== AVAILABLE ACTION TYPES =====
+- assignTo: Route to a specific named user (provide userName)
+- autoAssign: Route to ALL Finance Approvers (use when rule says "all approvers" or no specific person)
+- requireApproval: Require approval from a named user (provide approverName)
+- flagForReview: Flag the item for manual review
+- setStatus: Set a specific status (provide status value)
+
+===== FIELD MAPPING REFERENCE =====
+- Any of: "true up", "trueup", "true-up", "true up for current month", "true up to current month", "current month true up", "this month true up", "current true-up" → field: currentMonthTrueUp
+- Any of: "previous month true up", "last month true up", "prev true up", "prior month true up" → field: prevMonthTrueUp
+- "provision", "final provision" → field: finalProvision
+- "suggested provision" → field: suggestedProvision
+- "net amount", "amount", "PO amount" → field: netAmount
+- "3K" / "3k" / "3,000" → 3000 | "1L" / "1 lakh" / "100K" → 100000
+
+IMPORTANT: "true up to current month" or "true up for current month" is NOT a temporal expression. It refers to the field currentMonthTrueUp.
+
+Respond ONLY with valid JSON — no markdown, no explanation:
 {
-  "conditions": [{"field": "string", "operator": "string", "value": "string or number"}],
-  "actions": [{"type": "string", "userName": "optional string"}],
-  "summary": "brief human-readable summary of the rule"
+  "conditions": [{"field": "string", "operator": "string", "value": "string or number", "description": "human readable"}],
+  "actions": [{"type": "string", "userName": "name if assignTo", "approverName": "name if requireApproval", "status": "value if setStatus", "description": "human readable"}],
+  "rewrittenRule": "A cleaner, professional rewrite of the rule in one sentence",
+  "summary": "One clear sentence: what triggers this rule and what happens",
+  "applierScope": "Which items this applies to",
+  "approverNote": "Who gets suggested and why"
 }`;
 
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text().trim();
-      const jsonStr = responseText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      const parsed = JSON.parse(jsonStr);
+      const userPrompt = `Parse this approval rule step by step, then output the JSON:
+
+Input: "${text}"
+
+Step 1: Identify conditions (field + operator + value)
+Step 2: Identify actions (type + optional name)
+Step 3: Output the final JSON only`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0,
+        response_format: { type: "json_object" },
+      });
+
+      const responseText = completion.choices[0].message.content?.trim() || "{}";
+      const parsed = JSON.parse(responseText);
 
       res.json({
         conditions: parsed.conditions || [],
         actions: parsed.actions || [],
+        rewrittenRule: parsed.rewrittenRule || "",
         interpretedText: parsed.summary || text,
+        applierScope: parsed.applierScope || "",
+        approverNote: parsed.approverNote || "",
       });
     } catch (err: any) {
+      // Regex fallback — used when Gemini is unavailable
       const conditions: any[] = [];
       const actions: any[] = [];
+
+      // Helper: parse shorthand amounts like 3K → 3000, 1L → 100000
+      const parseAmount = (raw: string): number => {
+        const s = raw.replace(/,/g, "").trim();
+        if (/^\d+(\.\d+)?[Kk]$/.test(s)) return parseFloat(s) * 1000;
+        if (/^\d+(\.\d+)?[Ll]$/.test(s)) return parseFloat(s) * 100000;
+        return parseFloat(s) || 0;
+      };
+
+      const gtOp = (word: string) => ["above", "greater", "over", "more", "exceeds", "exceed"].includes(word.toLowerCase()) ? "greaterThan" : "lessThan";
+
+      // True-up conditions (currentMonthTrueUp / prevMonthTrueUp)
+      const trueUpMatch = text.match(
+        /(?:true[-\s]?up(?:\s+(?:for|to|of|in))?\s+(?:current|this)\s+month|current\s+month\s+true[-\s]?up|this\s+month(?:'s)?\s+true[-\s]?up)\s+(?:is\s+)?(greater\s+than|more\s+than|above|exceeds?|less\s+than|below|under)\s+([\d,.]+[KkLl]?)/i
+      );
+      if (trueUpMatch) {
+        const op = /greater|more|above|exceed/i.test(trueUpMatch[1]) ? "greaterThan" : "lessThan";
+        conditions.push({ field: "currentMonthTrueUp", operator: op, value: parseAmount(trueUpMatch[2]), description: `Current Month True-Up is ${op === "greaterThan" ? "greater than" : "less than"} ₹${parseAmount(trueUpMatch[2]).toLocaleString("en-IN")}` });
+      }
+
+      const prevTrueUpMatch = text.match(
+        /(?:prev(?:ious)?|last|prior)\s+month\s+true[-\s]?up\s+(?:is\s+)?(greater\s+than|more\s+than|above|exceeds?|less\s+than|below|under)\s+([\d,.]+[KkLl]?)/i
+      );
+      if (prevTrueUpMatch) {
+        const op = /greater|more|above|exceed/i.test(prevTrueUpMatch[1]) ? "greaterThan" : "lessThan";
+        conditions.push({ field: "prevMonthTrueUp", operator: op, value: parseAmount(prevTrueUpMatch[2]), description: `Prev Month True-Up is ${op === "greaterThan" ? "greater than" : "less than"} ₹${parseAmount(prevTrueUpMatch[2]).toLocaleString("en-IN")}` });
+      }
+
+      // Cost Center
       const ccMatch = text.match(/cost\s*center\s*(\w+)/i);
       if (ccMatch) conditions.push({ field: "costCenter", operator: "equals", value: ccMatch[1] });
+
+      // Vendor
       const vendorMatch = text.match(/vendor\s+(.+?)(?:\s+should|\s+go|\s+must|$)/i);
       if (vendorMatch) conditions.push({ field: "vendorName", operator: "contains", value: vendorMatch[1].trim() });
-      const amountMatch = text.match(/amount\s*(above|below|greater|less|over|under)\s*(\d[\d,]*)/i);
+
+      // Net amount
+      const amountMatch = text.match(/(?:net\s+)?amount\s*(above|below|greater|less|over|under)\s*([\d,.]+[KkLl]?)/i);
       if (amountMatch) {
-        const op = ["above", "greater", "over"].includes(amountMatch[1].toLowerCase()) ? "greaterThan" : "lessThan";
-        conditions.push({ field: "netAmount", operator: op, value: parseFloat(amountMatch[2].replace(/,/g, "")) });
+        conditions.push({ field: "netAmount", operator: gtOp(amountMatch[1]), value: parseAmount(amountMatch[2]) });
       }
-      const userMatch = text.match(/(?:to|by)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/);
+
+      // Action — named user or all approvers
+      const userMatch = text.match(/(?:to|by|assign\s+to)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/);
       if (userMatch) actions.push({ type: "assignTo", userName: userMatch[1] });
       else actions.push({ type: "autoAssign" });
+
       res.json({ conditions, actions, interpretedText: text, fallback: true });
     }
   });
@@ -502,6 +780,30 @@ Respond ONLY with valid JSON in this exact format, no markdown:
     try {
       await storage.deleteRule(parseInt(req.params.id));
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/rules/:id/toggle", authMiddleware, requireRole("Finance Admin"), async (req, res) => {
+    try {
+      const { isActive } = req.body;
+      const rule = await storage.updateRuleStatus(parseInt(req.params.id), Boolean(isActive));
+      res.json(rule);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Match rules against a set of PO lines - returns suggested approvers
+  app.post("/api/rules/match", authMiddleware, async (req, res) => {
+    try {
+      const { poLineIds } = req.body;
+      if (!poLineIds || !Array.isArray(poLineIds) || poLineIds.length === 0) {
+        return res.status(400).json({ message: "poLineIds array is required" });
+      }
+      const result = await storage.matchRulesForPoLines(poLineIds.map(Number));
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -723,7 +1025,7 @@ Respond ONLY with valid JSON in this exact format, no markdown:
       let periodCount = 0;
       let activityCount = 0;
 
-      for (const row of trimmedRows) {
+      const poLinePayloads = trimmedRows.map((row: any) => {
         const startDate = (row["Start Date"] || row["start_date"] || row["StartDate"] || "").toString().trim();
         const endDate = (row["End Date"] || row["end_date"] || row["EndDate"] || "").toString().trim();
         const hasDates = startDate && endDate;
@@ -736,8 +1038,8 @@ Respond ONLY with valid JSON in this exact format, no markdown:
         const lineItem = (row["PO Line Item"] || row["Line Item"] || row["po_line_item"] || row["LineItem"] || "").toString().trim();
         const uniqueId = (row["Unique ID"] || row["UniqueID"] || row["unique_id"] || `${poNumber}-${lineItem}`).toString().trim();
 
-        const poLine = await storage.createPoLine({
-          uploadId: null,
+        return {
+          uploadId: null as null,
           uniqueId: uniqueId || `${poNumber}-${lineItem}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           poNumber,
           poLineItem: lineItem,
@@ -758,20 +1060,15 @@ Respond ONLY with valid JSON in this exact format, no markdown:
           costCenterOwnerId: (row["CostCenter Owner Id"] || row["CC Owner ID"] || row["cost_center_owner_id"] || "").toString().trim(),
           documentDate: (row["Document Date"] || row["document_date"] || "").toString().trim(),
           category,
-          status: "Draft",
-        });
+          status: "Draft" as const,
+        };
+      });
 
-        const grnDoc = (row["GRN Doc"] || row["grn_doc"] || "").toString().trim();
-        const grnValue = parseFloat((row["GRN Value"] || row["grn_value"] || "0").toString().replace(/,/g, "")) || 0;
-        if (grnDoc || grnValue > 0) {
-          await storage.createGrnTransaction({
-            poLineId: poLine.id,
-            grnDate: (row["GRN Date"] || row["grn_date"] || "").toString().trim(),
-            grnDoc,
-            grnMovementType: (row["GRN Movement Type"] || row["grn_movement_type"] || "").toString().trim(),
-            grnValue,
-          });
-        }
+      // Insert in batches of 100 to handle large files efficiently
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < poLinePayloads.length; i += BATCH_SIZE) {
+        const batch = poLinePayloads.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(payload => storage.createPoLine(payload)));
       }
 
       const uploadRecord = await storage.createPoUpload({
@@ -796,6 +1093,126 @@ Respond ONLY with valid JSON in this exact format, no markdown:
         periodBased: periodCount,
         activityBased: activityCount,
       });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // GRN Upload
+  app.get("/api/grn/uploads", authMiddleware, async (req, res) => {
+    const uploads = await storage.getGrnUploads();
+    res.json(uploads);
+  });
+
+  app.post("/api/grn/upload", authMiddleware, requireRole("Finance Admin"), upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+      const config = await storage.getConfigMap();
+      const processingMonth = config.processing_month || "Feb 2026";
+
+      // Fix duplicate "GRN Date" headers: the second occurrence is actually the GRN document number
+      let csvText = req.file.buffer.toString("utf-8");
+      const csvLines = csvText.split(/\r?\n/);
+      if (csvLines.length > 0) {
+        const headerCols = csvLines[0].split(",");
+        let foundFirst = false;
+        const fixedCols = headerCols.map(h => {
+          if (h.trim() === "GRN Date") {
+            if (foundFirst) return "GRN Doc";
+            foundFirst = true;
+          }
+          return h;
+        });
+        csvLines[0] = fixedCols.join(",");
+        csvText = csvLines.join("\n");
+      }
+
+      const result = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+      if (result.errors.length > 0 && result.errors[0].type === "Abort") {
+        return res.status(400).json({ message: `CSV parse errors: ${result.errors[0].message}` });
+      }
+
+      const rows = (result.data as any[]).map((row: any) => {
+        const trimmed: any = {};
+        for (const key of Object.keys(row)) {
+          trimmed[key.trim()] = (row[key] || "").toString().trim();
+        }
+        return trimmed;
+      });
+
+      // Build a lookup map of poNumber-lineItem → poLineId
+      const allPoLines = await db.select({ id: poLines.id, poNumber: poLines.poNumber, poLineItem: poLines.poLineItem }).from(poLines);
+      const poLineMap = new Map<string, number>();
+      for (const line of allPoLines) {
+        poLineMap.set(`${line.poNumber}-${line.poLineItem}`, line.id);
+      }
+
+      // Deduplicate rows by (poLineId, grnDate, grnDoc) — source files may contain exact duplicate rows
+      const seenKeys = new Set<string>();
+      const grnRowsToInsert: { poLineId: number; grnDate: string; grnDoc: string; grnValue: number }[] = [];
+      const incomingGrnDocs = new Set<string>(); // track grnDoc values being uploaded
+
+      for (const row of rows) {
+        const poNumber = row["PO Number"] || "";
+        const lineItem = row["PO Line Item"] || "";
+        const poLineId = poLineMap.get(`${poNumber}-${lineItem}`);
+        if (!poLineId) continue;
+
+        const grnDate = row["GRN Date"] || "";
+        const grnDoc = row["GRN Doc"] || "";
+        const dedupKey = `${poLineId}|${grnDate}|${grnDoc}`;
+        if (seenKeys.has(dedupKey)) continue;
+        seenKeys.add(dedupKey);
+
+        if (grnDoc) incomingGrnDocs.add(grnDoc);
+
+        grnRowsToInsert.push({
+          poLineId,
+          grnDate,
+          grnDoc,
+          grnValue: parseFloat((row["GRN Value"] || "0").replace(/,/g, "")) || 0,
+        });
+      }
+
+      // Only delete DB rows whose grnDoc appears in this upload — preserves snapshots from other periods
+      if (incomingGrnDocs.size > 0) {
+        await db.delete(grnTransactions).where(inArray(grnTransactions.grnDoc, Array.from(incomingGrnDocs)));
+      }
+
+      if (grnRowsToInsert.length > 0) {
+        await db.insert(grnTransactions).values(
+          grnRowsToInsert.map(row => ({
+            poLineId: row.poLineId,
+            grnDate: row.grnDate,
+            grnDoc: row.grnDoc,
+            grnMovementType: "",
+            grnValue: row.grnValue,
+          }))
+        );
+      }
+
+      const matchedRows = grnRowsToInsert.length;
+      const unmatchedRows = rows.length - matchedRows;
+
+      const uploadRecord = await storage.createGrnUpload({
+        uploadedBy: req.userId!,
+        filename: req.file.originalname,
+        processingMonth,
+        totalRows: rows.length,
+        matchedRows,
+        unmatchedRows,
+        status: "Completed",
+      });
+
+      await storage.logAudit(req.userId!, "Upload GRN CSV", "grn_upload", String(uploadRecord.id), {
+        filename: req.file.originalname,
+        totalRows: rows.length,
+        matchedRows,
+        unmatchedRows,
+      });
+
+      res.json({ totalRows: rows.length, matchedRows, unmatchedRows });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -826,6 +1243,7 @@ Respond ONLY with valid JSON in this exact format, no markdown:
       await db.delete(grnTransactions);
       await db.delete(poLines);
       await db.delete(poUploads);
+      await db.delete(grnUploads);
       await db.delete(approvalRules);
       await db.delete(notifications);
       await db.delete(auditLog);

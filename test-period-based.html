@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Period-Based Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 { color: #333; }
+        .row {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+        .field {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+        }
+        .label { font-weight: bold; color: #666; }
+        .value { font-family: 'Courier New', monospace; }
+        .diff { color: red; font-weight: bold; }
+        .match { color: green; }
+    </style>
+</head>
+<body>
+    <h1>Period-Based Provision Calculation Analysis</h1>
+    <div id="results">Loading...</div>
+
+    <script>
+        const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImVtYWlsIjoiYWRtaW5AY29tcGFueS5jb20iLCJyb2xlcyI6WyJGaW5hbmNlIEFkbWluIl0sImlhdCI6MTc3MTU4NTQ2MSwiZXhwIjoxNzcxNjcxODYxfQ.JHJDFK3VGAzMKmdjPpFACZeV2vSET5s3ZuipxRZxDHo';
+        
+        fetch('http://localhost:3000/api/period-based', {
+            headers: {
+                'Authorization': `Bearer ${TOKEN}`
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('results');
+            container.innerHTML = '';
+            
+            data.slice(0, 5).forEach(row => {
+                const calculated = row.suggestedProvision - row.totalGrnToDate + row.currentMonthTrueUp;
+                const matches = calculated === row.finalProvision;
+                
+                const div = document.createElement('div');
+                div.className = 'row';
+                div.innerHTML = `
+                    <h3>PO: ${row.poNumber} (ID: ${row.id})</h3>
+                    <div class="field">
+                        <span class="label">Suggested Provision:</span>
+                        <span class="value">${row.suggestedProvision.toLocaleString()}</span>
+                    </div>
+                    <div class="field">
+                        <span class="label">Total GRN to Date:</span>
+                        <span class="value">${row.totalGrnToDate.toLocaleString()}</span>
+                    </div>
+                    <div class="field">
+                        <span class="label">Current Month True-Up:</span>
+                        <span class="value">${row.currentMonthTrueUp.toLocaleString()}</span>
+                    </div>
+                    <hr>
+                    <div class="field">
+                        <span class="label">Formula (SP - GRN + TU):</span>
+                        <span class="value">${calculated.toLocaleString()}</span>
+                    </div>
+                    <div class="field ${matches ? 'match' : 'diff'}">
+                        <span class="label">API Final Provision:</span>
+                        <span class="value">${row.finalProvision.toLocaleString()}</span>
+                    </div>
+                    <div class="field ${matches ? 'match' : 'diff'}">
+                        <span class="label">Difference:</span>
+                        <span class="value">${(row.finalProvision - calculated).toLocaleString()}</span>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        })
+        .catch(err => {
+            document.getElementById('results').innerHTML = `<p style="color: red;">Error: ${err.message}</p>`;
+        });
+    </script>
+</body>
+</html>

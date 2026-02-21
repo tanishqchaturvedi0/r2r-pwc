@@ -138,12 +138,12 @@ function AppSidebar() {
                 </SidebarMenuItem>
               ))}
 
-              {isFinance && canView("period_based") && (
+              {isFinance && (canView("period_based") || canView("activity_based") || canView("non_po")) && (
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={location === "/approval-tracker"}>
                     <Link href="/approval-tracker" data-testid="nav-approval-tracker">
                       <CheckSquare className="h-4 w-4" />
-                      <span>Approval Tracker</span>
+                      <span>Finance Approval Tracker</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
